@@ -250,6 +250,12 @@ OpenClaw Admin 是一个基于 Vue 3 构建的现代化 AI 智能体管理平台
 npm install
 ```
 
+### 初始化环境变量
+
+```bash
+cp .env.example .env
+```
+
 ### 开发模式
 
 启动前端开发服务器：
