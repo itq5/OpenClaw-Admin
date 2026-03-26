@@ -382,7 +382,8 @@ openclaw-admin/
 ├── vite.config.ts              # Vite Configuration
 ├── tsconfig.json               # TypeScript Configuration
 ├── package.json                # Project Configuration
-└── .env                        # Environment Variables
+├── .env.example                # Environment variable template
+└── .env                        # Local environment variables copied from .env.example
 ```
 
 ---
@@ -416,17 +417,27 @@ Build passes without type errors.
 
 ### Environment Variables
 
-Configure in `.env` file:
+Copy the template first, then fill in your local values:
+
+```bash
+cp .env.example .env
+```
+
+Then configure your `.env` file:
 
 ```env
 VITE_APP_TITLE=OpenClaw Admin
-VITE_APP_VERSION=0.0.1
+VITE_APP_VERSION=0.2.3
 OPENCLAW_WS_URL=ws://localhost:18789
-OPENCLAW_AUTH_TOKEN=xxxxxxx
-PORT=3000
-DEV_PORT=3001
-AUTH_USERNAME=admin
-AUTH_PASSWORD=admin
+OPENCLAW_AUTH_TOKEN=
+OPENCLAW_AUTH_PASSWORD=
+PORT=3001
+DEV_PORT=3000
+DEV_FRONTEND_URL=http://localhost:3000
+AUTH_USERNAME=
+AUTH_PASSWORD=
+MEDIA_DIR=
+# OPENCLAW_HOME=/path/to/.openclaw
 
 ```
 
