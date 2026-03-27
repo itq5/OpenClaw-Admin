@@ -38,7 +38,7 @@ const DEFAULT_CLIENT_ID: ConnectParams['client']['id'] = 'cli'
 const DEFAULT_CLIENT_MODE: ConnectParams['client']['mode'] = 'cli'
 
 function getClientVersion(): string {
-  return import.meta.env.VITE_APP_VERSION || '0.1.0'
+  return import.meta.env.VITE_APP_VERSION || '0.2.3'
 }
 
 function getClientPlatform(): string {

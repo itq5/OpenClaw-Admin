@@ -250,6 +250,12 @@ OpenClaw Admin 是一个基于 Vue 3 构建的现代化 AI 智能体管理平台
 npm install
 ```
 
+### 初始化环境变量
+
+```bash
+cp .env.example .env
+```
+
 ### 开发模式
 
 启动前端开发服务器：
@@ -382,7 +388,8 @@ openclaw-admin/
 ├── vite.config.ts              # Vite 配置
 ├── tsconfig.json               # TypeScript 配置
 ├── package.json                # 项目配置
-└── .env                        # 环境变量
+├── .env.example                # 环境变量示例
+└── .env                        # 本地环境变量（由 .env.example 复制）
 ```
 
 ---
@@ -416,18 +423,27 @@ npm run build
 
 ### 环境变量
 
-在 `.env` 文件中配置：
+先复制示例文件，再按本地环境填写：
+
+```bash
+cp .env.example .env
+```
+
+然后在 `.env` 文件中配置：
 
 ```env
 VITE_APP_TITLE=OpenClaw Admin
-VITE_APP_VERSION=0.0.1
+VITE_APP_VERSION=0.2.3
 OPENCLAW_WS_URL=ws://localhost:18789
-OPENCLAW_AUTH_TOKEN=xxxxxxx
+OPENCLAW_AUTH_TOKEN=
 OPENCLAW_AUTH_PASSWORD=      # Gateway 密码，与 Token 二选一即可
-PORT=3000
-DEV_PORT=3001
-AUTH_USERNAME=admin
-AUTH_PASSWORD=admin
+PORT=3001
+DEV_PORT=3000
+DEV_FRONTEND_URL=http://localhost:3000
+AUTH_USERNAME=
+AUTH_PASSWORD=
+MEDIA_DIR=
+# OPENCLAW_HOME=/path/to/.openclaw
 ```
 
 ---

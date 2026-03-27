@@ -3,6 +3,8 @@ import { randomUUID } from 'crypto'
 import EventEmitter from 'events'
 import { createHash, generateKeyPairSync, sign } from 'crypto'
 
+const APP_VERSION = process.env.VITE_APP_VERSION || process.env.npm_package_version || '0.2.3'
+
 export class OpenClawGateway extends EventEmitter {
   constructor(url, authToken, authPassword) {
     super()
@@ -88,7 +90,7 @@ export class OpenClawGateway extends EventEmitter {
       client: {
         id: 'cli',
         displayName: 'OpenClaw Web Backend',
-        version: '0.1.0',
+        version: APP_VERSION,
         platform: process.platform,
         mode: 'cli',
       },
@@ -102,7 +104,7 @@ export class OpenClawGateway extends EventEmitter {
         password: this.authPassword || '', // 支持 password 认证
       },
       locale: 'zh-CN',
-      userAgent: 'OpenClaw-Web-Backend/0.1.0',
+      userAgent: `OpenClaw-Web-Backend/${APP_VERSION}`,
     }
 
     try {

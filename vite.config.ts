@@ -4,6 +4,7 @@ import { defineConfig, loadEnv } from 'vite'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const appVersion = env.VITE_APP_VERSION || process.env.npm_package_version || '0.2.3'
   
   const backendPort = env.PORT || '3001'
   const frontendPort = env.DEV_PORT || '3000'
@@ -39,7 +40,7 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       'import.meta.env.VITE_APP_TITLE': JSON.stringify(env.VITE_APP_TITLE || 'OpenClaw Web'),
-      'import.meta.env.VITE_APP_VERSION': JSON.stringify(env.VITE_APP_VERSION || '0.1.0'),
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
     },
   }
 })

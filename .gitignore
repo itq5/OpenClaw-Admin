@@ -2,3 +2,5 @@ node_modules
 dist
 .vscode
 backups
+.env
+!.env.example
