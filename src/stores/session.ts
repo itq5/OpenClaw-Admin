@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useWebSocketStore } from './websocket'
+import { useRpcSafe } from '@/composables/useRpcSafe'
 import type { Session, SessionDetail, SessionExport } from '@/api/types'
 
 export const useSessionStore = defineStore('session', () => {
@@ -9,6 +10,7 @@ export const useSessionStore = defineStore('session', () => {
   const loading = ref(false)
 
   const wsStore = useWebSocketStore()
+  const rpc = useRpcSafe()
 
   function parseUsageNumber(value: unknown): number | undefined {
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -127,7 +129,11 @@ export const useSessionStore = defineStore('session', () => {
   async function fetchSessions() {
     loading.value = true
     try {
-      const list = await wsStore.rpc.listSessions()
+      const list = await rpc.call(() => wsStore.rpc.listSessions(), {
+        label: 'listSessions',
+        timeout: 10000,
+        retries: 1,
+      })
       if (list.length === 0) {
         sessions.value = list
         return
@@ -141,9 +147,13 @@ export const useSessionStore = defineStore('session', () => {
       }
 
       try {
-        const usage = await wsStore.rpc.getSessionsUsage({
-          limit: Math.max(200, list.length * 4),
-        })
+        const usage = await rpc.call(
+          () =>
+            wsStore.rpc.getSessionsUsage({
+              limit: Math.max(200, list.length * 4),
+            }),
+          { label: 'getSessionsUsage', timeout: 12000, retries: 1 }
+        )
         sessions.value = mergeUsageIntoSessions(list, usage)
       } catch {
         sessions.value = list
@@ -159,7 +169,10 @@ export const useSessionStore = defineStore('session', () => {
   async function fetchSession(key: string) {
     loading.value = true
     try {
-      currentSession.value = await wsStore.rpc.getSession(key)
+      currentSession.value = await rpc.call(() => wsStore.rpc.getSession(key), {
+        label: 'getSession',
+        timeout: 10000,
+      })
     } catch (error) {
       currentSession.value = null
       console.error('[SessionStore] fetchSession failed:', error)
