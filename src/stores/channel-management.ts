@@ -10,6 +10,7 @@ import type {
 } from '@/api/types'
 import { ConnectionState } from '@/api/types'
 import { useWebSocketStore } from './websocket'
+import { useRpcSafe } from '@/composables/useRpcSafe'
 import {
   buildChannelPatches,
   cloneChannelConfigs,
@@ -84,6 +85,7 @@ function sleep(ms: number): Promise<void> {
 
 export const useChannelManagementStore = defineStore('channel-management', () => {
   const wsStore = useWebSocketStore()
+  const rpc = useRpcSafe()
 
   const loading = ref(false)
   const saving = ref(false)
@@ -236,7 +238,9 @@ export const useChannelManagementStore = defineStore('channel-management', () =>
   }
 
   async function refreshRuntimeChannels(): Promise<void> {
-    runtimeChannels.value = await wsStore.rpc.listChannels()
+    runtimeChannels.value = await rpc.call(() => wsStore.rpc.listChannels(), {
+      label: 'listChannels', timeout: 10000, retries: 1,
+    })
     syncPluginInstalledMap()
   }
 
@@ -245,8 +249,8 @@ export const useChannelManagementStore = defineStore('channel-management', () =>
     lastError.value = null
     try {
       const [runtime, config] = await Promise.all([
-        wsStore.rpc.listChannels(),
-        wsStore.rpc.getConfig(),
+        rpc.call(() => wsStore.rpc.listChannels(), { label: 'listChannels', timeout: 10000, retries: 1 }),
+        rpc.call(() => wsStore.rpc.getConfig(), { label: 'getConfig', timeout: 12000, retries: 1 }),
       ])
       runtimeChannels.value = runtime
       resetDraftFromConfig(config)
@@ -339,7 +343,9 @@ export const useChannelManagementStore = defineStore('channel-management', () =>
     }
 
     try {
-      const list = await wsStore.rpc.listPlugins()
+      const list = await rpc.call(() => wsStore.rpc.listPlugins(), {
+        label: 'listPlugins', timeout: 10000, retries: 0,
+      })
       plugins.value = list
       pluginRpcSupported.value = true
     } catch (error) {
@@ -373,7 +379,9 @@ export const useChannelManagementStore = defineStore('channel-management', () =>
     let lastInstallError: unknown
     for (const pluginName of pluginNames) {
       try {
-        await wsStore.rpc.installPlugin(pluginName)
+        await rpc.call(() => wsStore.rpc.installPlugin(pluginName), {
+          label: 'installPlugin', timeout: 30000, retries: 0,
+        })
         await refreshPlugins()
         return pluginName
       } catch (error) {
@@ -421,7 +429,9 @@ export const useChannelManagementStore = defineStore('channel-management', () =>
     applying.value = true
     lastError.value = null
     try {
-      await wsStore.rpc.applyConfig()
+      await rpc.call(() => wsStore.rpc.applyConfig(), {
+        label: 'applyConfig', timeout: 15000, retries: 0,
+      })
     } catch (error) {
       // config.apply 可能触发连接重置，允许继续等待重连
       console.warn('[ChannelManagement] applyConfig request interrupted:', error)
@@ -448,8 +458,12 @@ export const useChannelManagementStore = defineStore('channel-management', () =>
         return []
       }
 
-      await wsStore.rpc.patchConfig(patches)
-      const latestConfig = await wsStore.rpc.getConfig()
+      await rpc.call(() => wsStore.rpc.patchConfig(patches), {
+        label: 'patchConfig', timeout: 15000, retries: 1,
+      })
+      const latestConfig = await rpc.call(() => wsStore.rpc.getConfig(), {
+        label: 'getConfig', timeout: 12000, retries: 1,
+      })
       resetDraftFromConfig(latestConfig)
       await refreshRuntimeChannels()
 
@@ -467,21 +481,29 @@ export const useChannelManagementStore = defineStore('channel-management', () =>
   }
 
   async function authChannel(channel: Channel): Promise<void> {
-    await wsStore.rpc.authChannel({
-      channelId: channel.id,
-      channelKey: deriveChannelKey(channel),
-      accountId: deriveAccountId(channel),
-    })
+    await rpc.call(
+      () =>
+        wsStore.rpc.authChannel({
+          channelId: channel.id,
+          channelKey: deriveChannelKey(channel),
+          accountId: deriveAccountId(channel),
+        }),
+      { label: 'authChannel', timeout: 15000, retries: 0 }
+    )
     await refreshRuntimeChannels()
   }
 
   async function pairChannel(channel: Channel, code: string): Promise<void> {
-    await wsStore.rpc.pairChannel({
-      channelId: channel.id,
-      channelKey: deriveChannelKey(channel),
-      accountId: deriveAccountId(channel),
-      code,
-    })
+    await rpc.call(
+      () =>
+        wsStore.rpc.pairChannel({
+          channelId: channel.id,
+          channelKey: deriveChannelKey(channel),
+          accountId: deriveAccountId(channel),
+          code,
+        }),
+      { label: 'pairChannel', timeout: 15000, retries: 0 }
+    )
     await refreshRuntimeChannels()
   }
 

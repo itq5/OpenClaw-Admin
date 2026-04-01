@@ -1,21 +1,25 @@
-<script setup lang="ts" generic="T">
+<script setup lang="ts">
 /**
  * AsyncSection — Unified loading / error / empty / default render container.
  *
  * Props:
- *   loading  – show skeleton / spinner instead of content
- *   refreshing – show a subtle refresh indicator (e.g. top-border shimmer)
- *   error   – Error instance or string; shows error state with optional retry button
- *   isEmpty – true when there is no data to show (renders empty slot)
+ *   loading      – show skeleton / spinner instead of content
+ *   refreshing  – show a subtle refresh indicator strip at top
+ *   error       – Error instance or string; shows error state with retry button
+ *   isEmpty     – true when there is no data to show (renders empty slot)
  *   showSkeleton – render skeleton slot while loading (default true)
  *   skeletonHeight – CSS height of skeleton placeholder (default '120px')
+ *   errorLabel  – accessibility label for the error alert title
  *
  * Slots:
- *   skeleton  – custom skeleton (shown when loading && showSkeleton)
- *   refreshing – shown above default content when refreshing
- *   error    – error content (default: error message + retry button)
- *   empty    – shown when data is loaded but empty
- *   default  – the actual content; always rendered so it stays mounted
+ *   skeleton    – custom skeleton (shown when loading && showSkeleton)
+ *   refreshing  – shown above default content when refreshing
+ *   error       – error content (default: error message + retry button)
+ *   empty       – shown when data is loaded but empty
+ *   default     – the actual content; always rendered so it stays mounted
+ *
+ * Emits:
+ *   retry – fired when the built-in retry button is clicked
  *
  * Usage:
  *   <AsyncSection :loading="statsLoading" :error="statsError">
@@ -29,7 +33,7 @@
  *   </AsyncSection>
  */
 import { computed } from 'vue'
-import { NSpin, NButton, NAlert, NEmpty } from 'naive-ui'
+import { NAlert, NButton, NEmpty } from 'naive-ui'
 
 const props = withDefaults(
   defineProps<{
@@ -39,9 +43,6 @@ const props = withDefaults(
     isEmpty?: boolean
     showSkeleton?: boolean
     skeletonHeight?: string
-    /** When true, renders skeleton only (no default slot fallback while loading). */
-    skeletonOnly?: boolean
-    /** Label passed to error display for accessibility. */
     errorLabel?: string
   }>(),
   {
@@ -51,7 +52,6 @@ const props = withDefaults(
     isEmpty: false,
     showSkeleton: true,
     skeletonHeight: '120px',
-    skeletonOnly: false,
     errorLabel: 'Error',
   }
 )
@@ -83,10 +83,10 @@ const showLoading = computed(() => props.loading && !props.refreshing)
       <slot name="error">
         <NAlert type="error" :bordered="false" :title="errorLabel">
           {{ errorMessage }}
-          <template #action>
-            <NButton size="small" @click="emit('retry')">重试 / Retry</NButton>
-          </template>
         </NAlert>
+        <div class="async-section__error-actions">
+          <NButton size="small" @click="emit('retry')">重试 / Retry</NButton>
+        </div>
       </slot>
     </div>
 
@@ -97,7 +97,7 @@ const showLoading = computed(() => props.loading && !props.refreshing)
       </slot>
     </div>
 
-    <!-- Default content — always rendered (stays mounted) -->
+    <!-- Default content — always rendered so it stays mounted across state transitions -->
     <div v-else class="async-section__content">
       <!-- Subtle refreshing indicator (thin shimmer strip at top) -->
       <div v-if="refreshing" class="async-section__refreshing-bar" />
@@ -138,6 +138,14 @@ const showLoading = computed(() => props.loading && !props.refreshing)
 /* Error */
 .async-section__error {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.async-section__error-actions {
+  display: flex;
+  justify-content: flex-start;
 }
 
 /* Empty */

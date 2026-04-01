@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useWebSocketStore } from './websocket'
+import { useRpcSafe } from '@/composables/useRpcSafe'
 import type { DeviceNode, NodeInvokeParams } from '@/api/types'
 
 export const useNodeStore = defineStore('node', () => {
@@ -8,11 +9,14 @@ export const useNodeStore = defineStore('node', () => {
   const loading = ref(false)
 
   const wsStore = useWebSocketStore()
+  const rpc = useRpcSafe()
 
   async function fetchNodes() {
     loading.value = true
     try {
-      nodes.value = await wsStore.rpc.listNodes()
+      nodes.value = await rpc.call(() => wsStore.rpc.listNodes(), {
+        label: 'listNodes', timeout: 10000, retries: 1,
+      })
     } catch (error) {
       nodes.value = []
       console.error('[NodeStore] fetchNodes failed:', error)
@@ -22,15 +26,21 @@ export const useNodeStore = defineStore('node', () => {
   }
 
   async function invokeNode(params: NodeInvokeParams) {
-    return await wsStore.rpc.invokeNode(params)
+    return await rpc.call(() => wsStore.rpc.invokeNode(params), {
+      label: 'invokeNode', timeout: 30000, retries: 0,
+    })
   }
 
   async function requestPairing(nodeId: string) {
-    await wsStore.rpc.requestNodePairing(nodeId)
+    await rpc.call(() => wsStore.rpc.requestNodePairing(nodeId), {
+      label: 'requestNodePairing', timeout: 15000, retries: 0,
+    })
   }
 
   async function approvePairing(nodeId: string, code: string) {
-    await wsStore.rpc.approveNodePairing(nodeId, code)
+    await rpc.call(() => wsStore.rpc.approveNodePairing(nodeId, code), {
+      label: 'approveNodePairing', timeout: 15000, retries: 0,
+    })
     await fetchNodes()
   }
 

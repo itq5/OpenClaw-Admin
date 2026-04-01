@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useWebSocketStore } from './websocket'
+import { useRpcSafe } from '@/composables/useRpcSafe'
 import type { OpenClawConfig, ConfigPatch } from '@/api/types'
 
 export const useConfigStore = defineStore('config', () => {
@@ -10,12 +11,15 @@ export const useConfigStore = defineStore('config', () => {
   const lastError = ref<string | null>(null)
 
   const wsStore = useWebSocketStore()
+  const rpc = useRpcSafe()
 
   async function fetchConfig() {
     loading.value = true
     lastError.value = null
     try {
-      config.value = await wsStore.rpc.getConfig()
+      config.value = await rpc.call(() => wsStore.rpc.getConfig(), {
+        label: 'getConfig', timeout: 12000, retries: 1,
+      })
     } catch (error) {
       config.value = null
       lastError.value = error instanceof Error ? error.message : String(error)
@@ -29,7 +33,9 @@ export const useConfigStore = defineStore('config', () => {
     saving.value = true
     lastError.value = null
     try {
-      await wsStore.rpc.patchConfig(patches)
+      await rpc.call(() => wsStore.rpc.patchConfig(patches), {
+        label: 'patchConfig', timeout: 15000, retries: 1,
+      })
       await fetchConfig()
     } catch (error) {
       lastError.value = error instanceof Error ? error.message : String(error)
@@ -43,7 +49,9 @@ export const useConfigStore = defineStore('config', () => {
     saving.value = true
     lastError.value = null
     try {
-      await wsStore.rpc.setConfig(newConfig)
+      await rpc.call(() => wsStore.rpc.setConfig(newConfig), {
+        label: 'setConfig', timeout: 15000, retries: 1,
+      })
       await fetchConfig()
     } catch (error) {
       lastError.value = error instanceof Error ? error.message : String(error)
@@ -57,7 +65,9 @@ export const useConfigStore = defineStore('config', () => {
     saving.value = true
     lastError.value = null
     try {
-      await wsStore.rpc.applyConfig()
+      await rpc.call(() => wsStore.rpc.applyConfig(), {
+        label: 'applyConfig', timeout: 15000, retries: 0,
+      })
     } catch (error) {
       lastError.value = error instanceof Error ? error.message : String(error)
       throw error
