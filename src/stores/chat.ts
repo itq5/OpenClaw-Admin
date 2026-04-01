@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useWebSocketStore } from './websocket'
+import { useRpcSafe } from '@/composables/useRpcSafe'
 import type { ChatMessage } from '@/api/types'
 import { byLocale, getActiveLocale } from '@/i18n/text'
 
@@ -108,6 +109,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   const wsStore = useWebSocketStore()
+  const rpc = useRpcSafe()
 
   function toolCompletedDetail(toolName: string): string {
     const locale = getActiveLocale()
@@ -356,7 +358,9 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const normalizedKey = key.trim()
       sessionKey.value = normalizedKey
-      messages.value = await wsStore.rpc.listChatHistory(normalizedKey)
+      messages.value = await rpc.call(() => wsStore.rpc.listChatHistory(normalizedKey), {
+        label: 'listChatHistory', timeout: 15000, retries: 1,
+      })
       lastSyncedAt.value = Date.now()
     } catch (error) {
       if (!silent || clearError) {
@@ -931,12 +935,16 @@ export const useChatStore = defineStore('chat', () => {
     sending.value = true
     lastError.value = null
     try {
-      await wsStore.rpc.sendChatMessage({
-        sessionKey: sessionKey.value.trim(),
-        message: text,
-        model: model?.trim() || undefined,
-        idempotencyKey,
-      })
+      await rpc.call(
+        () =>
+          wsStore.rpc.sendChatMessage({
+            sessionKey: sessionKey.value.trim(),
+            message: text,
+            model: model?.trim() || undefined,
+            idempotencyKey,
+          }),
+        { label: 'sendChatMessage', timeout: 30000, retries: 1 }
+      )
       const agentStatus = getOrCreateAgentStatus(agentId)
       if (agentStatus.phase === 'sending' && agentStatus.runId === idempotencyKey) {
         setAgentStatusPhase(agentId, 'waiting', { runId: idempotencyKey, detail: null })
@@ -974,7 +982,9 @@ export const useChatStore = defineStore('chat', () => {
 
     setAgentStatusPhase(agentId, 'aborting', { detail: byLocale('停止中...', 'Stopping...', getActiveLocale()) })
     try {
-      await wsStore.rpc.abortChat(undefined, sessionKey.value.trim())
+      await rpc.call(() => wsStore.rpc.abortChat(undefined, sessionKey.value.trim()), {
+        label: 'abortChat', timeout: 10000, retries: 0,
+      })
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       setAgentStatusPhase(agentId, 'error', { runId: null, detail: reason })
