@@ -736,15 +736,14 @@ function confirmRunUpdate() {
 }
 
 async function refreshOpsData() {
-  await Promise.all([
+  // Run all data loads concurrently — no sequential blocking
+  await Promise.allSettled([
     loadHealthStatus(),
     loadPresence(),
     loadLogs({ reset: true }),
     loadNodes(),
+    activeTab.value === 'approvals' ? loadApprovals() : Promise.resolve(),
   ])
-  if (activeTab.value === 'approvals') {
-    await loadApprovals()
-  }
 }
 
 watch(
