@@ -42,7 +42,14 @@ type UsageMode = 'tokens' | 'cost'
 const router = useRouter()
 const wsStore = useWebSocketStore()
 const { t, locale } = useI18n()
-const loading = ref(true)
+
+// Per-module loading states — each module loads independently
+const statsLoading = ref(true)
+const kpisLoading = ref(true)
+const trendLoading = ref(true)
+const structureLoading = ref(true)
+const topLoading = ref(true)
+
 const refreshing = ref(false)
 const usageError = ref<string | null>(null)
 const lastUpdatedAt = ref<number | null>(null)
@@ -307,7 +314,6 @@ function handleTrendMouseMove(event: MouseEvent) {
   const pointPxX = (point.x / trendGeometry.value.width) * rect.width
   const pointPxY = (point.y / trendGeometry.value.height) * rect.height
 
-  // Keep in sync with `.trend-tooltip` width/height
   const tooltipWidth = 260
   const tooltipHeight = 32
   const margin = 8
@@ -418,6 +424,81 @@ const topToolMax = computed(() =>
   Math.max(...topTools.value.map((item) => item.count || 0), 0)
 )
 
+// Per-module fetch functions — fire independently, resolve when ready
+
+async function fetchStats() {
+  statsLoading.value = true
+  try {
+    const [sessionsRes, cronsRes, modelsRes, skillsRes, configRes] = await Promise.allSettled([
+      wsStore.rpc.listSessions(),
+      wsStore.rpc.listCrons(),
+      wsStore.rpc.listModels(),
+      wsStore.rpc.listSkills(),
+      wsStore.rpc.getConfig(),
+    ])
+
+    const sessionList = sessionsRes.status === 'fulfilled' ? sessionsRes.value : []
+    const cronList = cronsRes.status === 'fulfilled' ? cronsRes.value : []
+    const modelList = modelsRes.status === 'fulfilled' ? modelsRes.value : []
+    const skillList = skillsRes.status === 'fulfilled' ? skillsRes.value : []
+    const config = configRes.status === 'fulfilled' ? configRes.value : null
+    stats.value = {
+      sessionCount: sessionList.length,
+      cronCount: cronList.filter((job: CronJob) => job.enabled).length,
+      modelCount: resolveConfiguredModelCount(config, modelList),
+      installedSkills: skillList.filter((s: Skill) => s.installed).length,
+    }
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+async function fetchUsageData() {
+  // Fire usage fetches independently from stats
+  const [usageRes, usageCostRes] = await Promise.allSettled([
+    wsStore.rpc.getSessionsUsage({
+      startDate: usageStartDate.value,
+      endDate: usageEndDate.value,
+      limit: 1000,
+    }),
+    wsStore.rpc.getUsageCost({
+      startDate: usageStartDate.value,
+      endDate: usageEndDate.value,
+    }),
+  ])
+
+  // Update all usage-derived modules at once when both resolve
+  // But they show skeleton independently during loading
+  const hasUsageRes = usageRes.status === 'fulfilled'
+  const hasCostRes = usageCostRes.status === 'fulfilled'
+
+  if (hasUsageRes) {
+    sessionsUsageResult.value = usageRes.value
+  } else {
+    sessionsUsageResult.value = null
+    usageError.value = usageRes.reason instanceof Error ? usageRes.reason.message : String(usageRes.reason)
+  }
+
+  if (hasCostRes) {
+    usageCostSummary.value = usageCostRes.value
+  } else {
+    usageCostSummary.value = null
+    if (!usageError.value) {
+      usageError.value = usageCostRes.reason instanceof Error
+        ? usageCostRes.reason.message
+        : String(usageCostRes.reason)
+    }
+  }
+
+  lastUpdatedAt.value = Date.now()
+
+  // Mark all usage-derived modules as done
+  kpisLoading.value = false
+  trendLoading.value = false
+  structureLoading.value = false
+  topLoading.value = false
+}
+
 onMounted(async () => {
   applyRangePreset('7d', false)
   retryAfterFirstConnect = wsStore.state !== 'connected'
@@ -425,7 +506,11 @@ onMounted(async () => {
   cleanupStateChange = wsStore.subscribe('stateChange', () => {
     maybeRetryAfterConnect()
   })
-  await refreshDashboard()
+
+  // Fire all module fetches in parallel — each resolves independently
+  void fetchStats()
+  void fetchUsageData()
+
   maybeRetryAfterConnect()
 })
 
@@ -450,56 +535,12 @@ async function refreshDashboard() {
   usageError.value = null
 
   try {
-    const [sessionsRes, cronsRes, modelsRes, skillsRes, configRes, usageRes, usageCostRes] = await Promise.allSettled([
-      wsStore.rpc.listSessions(),
-      wsStore.rpc.listCrons(),
-      wsStore.rpc.listModels(),
-      wsStore.rpc.listSkills(),
-      wsStore.rpc.getConfig(),
-      wsStore.rpc.getSessionsUsage({
-        startDate: usageStartDate.value,
-        endDate: usageEndDate.value,
-        limit: 1000,
-      }),
-      wsStore.rpc.getUsageCost({
-        startDate: usageStartDate.value,
-        endDate: usageEndDate.value,
-      }),
+    // Fire all fetches in parallel, each module updates when its data arrives
+    await Promise.allSettled([
+      fetchStats(),
+      fetchUsageData(),
     ])
-
-    const sessionList = sessionsRes.status === 'fulfilled' ? sessionsRes.value : []
-    const cronList = cronsRes.status === 'fulfilled' ? cronsRes.value : []
-    const modelList = modelsRes.status === 'fulfilled' ? modelsRes.value : []
-    const skillList = skillsRes.status === 'fulfilled' ? skillsRes.value : []
-    const config = configRes.status === 'fulfilled' ? configRes.value : null
-    stats.value = {
-      sessionCount: sessionList.length,
-      cronCount: cronList.filter((job: CronJob) => job.enabled).length,
-      modelCount: resolveConfiguredModelCount(config, modelList),
-      installedSkills: skillList.filter((s: Skill) => s.installed).length,
-    }
-
-    if (usageRes.status === 'fulfilled') {
-      sessionsUsageResult.value = usageRes.value
-    } else {
-      sessionsUsageResult.value = null
-      usageError.value = usageRes.reason instanceof Error ? usageRes.reason.message : String(usageRes.reason)
-    }
-
-    if (usageCostRes.status === 'fulfilled') {
-      usageCostSummary.value = usageCostRes.value
-    } else {
-      usageCostSummary.value = null
-      if (!usageError.value) {
-        usageError.value = usageCostRes.reason instanceof Error
-          ? usageCostRes.reason.message
-          : String(usageCostRes.reason)
-      }
-    }
-
-    lastUpdatedAt.value = Date.now()
   } finally {
-    loading.value = false
     refreshing.value = false
   }
 }
@@ -521,12 +562,23 @@ function applyRangePreset(preset: Exclude<RangePreset, 'custom'>, refresh = true
   }
 
   if (refresh) {
-    void refreshDashboard()
+    // Reset usage loading states and re-fetch
+    kpisLoading.value = true
+    trendLoading.value = true
+    structureLoading.value = true
+    topLoading.value = true
+    void fetchUsageData()
   }
 }
 
 function handleDateRangeChanged() {
   rangePreset.value = 'custom'
+  // Reset usage loading states and re-fetch
+  kpisLoading.value = true
+  trendLoading.value = true
+  structureLoading.value = true
+  topLoading.value = true
+  void fetchUsageData()
 }
 
 function addDays(base: Date, offset: number): Date {
@@ -723,178 +775,247 @@ function viewModels() {
 </script>
 
 <template>
-  <NSpin :show="loading">
-    <div class="dashboard-page">
-      <NCard class="dashboard-hero" :bordered="false">
-        <div class="dashboard-hero-top">
-          <div>
-            <div class="dashboard-hero-title">{{ t('pages.dashboard.hero.title') }}</div>
-            <div class="dashboard-hero-subtitle">
-              {{ t('pages.dashboard.hero.subtitle') }}
-            </div>
+  <!-- Page shell — no full-page loading spinner. Each module handles its own loading state. -->
+  <div class="dashboard-page">
+    <!-- Hero / Filters -->
+    <NCard class="dashboard-hero" :bordered="false">
+      <div class="dashboard-hero-top">
+        <div>
+          <div class="dashboard-hero-title">{{ t('pages.dashboard.hero.title') }}</div>
+          <div class="dashboard-hero-subtitle">
+            {{ t('pages.dashboard.hero.subtitle') }}
           </div>
-          <NSpace :size="8" wrap>
-            <NTag :type="connectionType" round :bordered="false">{{ connectionLabel }}</NTag>
-            <NTag type="info" round :bordered="false">{{ usageCoverageText }}</NTag>
-            <NTag round :bordered="false">{{ lastUpdatedText }}</NTag>
-          </NSpace>
         </div>
-
-        <NSpace :size="8" wrap class="dashboard-filters-row">
-          <NButton size="small" :type="rangePreset === 'today' ? 'primary' : 'default'" secondary @click="applyRangePreset('today')">{{ t('pages.dashboard.range.today') }}</NButton>
-          <NButton size="small" :type="rangePreset === '7d' ? 'primary' : 'default'" secondary @click="applyRangePreset('7d')">7d</NButton>
-          <NButton size="small" :type="rangePreset === '30d' ? 'primary' : 'default'" secondary @click="applyRangePreset('30d')">30d</NButton>
-
-          <input
-            v-model="usageStartDate"
-            class="usage-date-input"
-            type="date"
-            @change="handleDateRangeChanged"
-          />
-          <span class="usage-date-sep">{{ t('pages.dashboard.range.to') }}</span>
-          <input
-            v-model="usageEndDate"
-            class="usage-date-input"
-            type="date"
-            @change="handleDateRangeChanged"
-          />
-
-          <NButton size="small" :type="usageMode === 'tokens' ? 'primary' : 'default'" secondary @click="usageMode = 'tokens'">{{ t('pages.dashboard.usageMode.tokens') }}</NButton>
-
-          <NButton type="primary" :loading="refreshing" @click="refreshDashboard">
-            <template #icon><NIcon :component="RefreshOutline" /></template>
-            {{ t('common.refresh') }}
-          </NButton>
-          <NButton secondary @click="viewChat">
-            <template #icon><NIcon :component="ChatboxEllipsesOutline" /></template>
-            {{ t('routes.chat') }}
-          </NButton>
-          <NButton secondary @click="viewCron">{{ t('routes.cron') }}</NButton>
-          <NButton secondary @click="viewModels">{{ t('routes.models') }}</NButton>
+        <NSpace :size="8" wrap>
+          <NTag :type="connectionType" round :bordered="false">{{ connectionLabel }}</NTag>
+          <NTag type="info" round :bordered="false">{{ usageCoverageText }}</NTag>
+          <NTag round :bordered="false">{{ lastUpdatedText }}</NTag>
         </NSpace>
+      </div>
 
-        <NAlert v-if="usageError" type="warning" :bordered="false" style="margin-top: 10px;">
-          {{ t('pages.dashboard.usage.error', { error: usageError }) }}
-        </NAlert>
-      </NCard>
+      <NSpace :size="8" wrap class="dashboard-filters-row">
+        <NButton size="small" :type="rangePreset === 'today' ? 'primary' : 'default'" secondary @click="applyRangePreset('today')">{{ t('pages.dashboard.range.today') }}</NButton>
+        <NButton size="small" :type="rangePreset === '7d' ? 'primary' : 'default'" secondary @click="applyRangePreset('7d')">7d</NButton>
+        <NButton size="small" :type="rangePreset === '30d' ? 'primary' : 'default'" secondary @click="applyRangePreset('30d')">30d</NButton>
 
-      <NGrid cols="1 s:2 m:3 l:5" responsive="screen" :x-gap="12" :y-gap="12">
-        <NGridItem>
-          <StatCard :title="t('pages.dashboard.stats.sessions')" :value="stats.sessionCount" :icon="ChatbubblesOutline" color="#18a058" />
-        </NGridItem>
-        <NGridItem>
-          <StatCard :title="t('pages.dashboard.stats.cronJobs')" :value="stats.cronCount" :icon="CalendarOutline" color="#f0a020" />
-        </NGridItem>
-        <NGridItem>
-          <StatCard :title="t('pages.dashboard.stats.models')" :value="stats.modelCount" :icon="SparklesOutline" color="#2080f0" />
-        </NGridItem>
-        <NGridItem>
-          <StatCard :title="t('pages.dashboard.stats.skills')" :value="stats.installedSkills" :icon="ExtensionPuzzleOutline" color="#8b5cf6" />
-        </NGridItem>
-        <NGridItem>
-          <StatCard :title="t('pages.dashboard.stats.totalTokens')" :value="tokenTotalDisplay" :icon="FlashOutline" color="#d03050" />
-        </NGridItem>
-      </NGrid>
+        <input
+          v-model="usageStartDate"
+          class="usage-date-input"
+          type="date"
+          @change="handleDateRangeChanged"
+        />
+        <span class="usage-date-sep">{{ t('pages.dashboard.range.to') }}</span>
+        <input
+          v-model="usageEndDate"
+          class="usage-date-input"
+          type="date"
+          @change="handleDateRangeChanged"
+        />
 
-      <NCard :title="t('pages.dashboard.cards.kpis')" class="dashboard-card">
-        <div class="kpi-grid">
-          <div v-for="kpi in usageKpis" :key="kpi.key" class="kpi-card">
-            <NText depth="3">{{ kpi.label }}</NText>
-            <div class="kpi-value">{{ kpi.value }}</div>
-            <NText depth="3" style="font-size: 12px;">{{ kpi.hint }}</NText>
-          </div>
+        <NButton size="small" :type="usageMode === 'tokens' ? 'primary' : 'default'" secondary @click="usageMode = 'tokens'">{{ t('pages.dashboard.usageMode.tokens') }}</NButton>
+
+        <NButton type="primary" :loading="refreshing" @click="refreshDashboard">
+          <template #icon><NIcon :component="RefreshOutline" /></template>
+          {{ t('common.refresh') }}
+        </NButton>
+        <NButton secondary @click="viewChat">
+          <template #icon><NIcon :component="ChatboxEllipsesOutline" /></template>
+          {{ t('routes.chat') }}
+        </NButton>
+        <NButton secondary @click="viewCron">{{ t('routes.cron') }}</NButton>
+        <NButton secondary @click="viewModels">{{ t('routes.models') }}</NButton>
+      </NSpace>
+
+      <NAlert v-if="usageError" type="warning" :bordered="false" style="margin-top: 10px;">
+        {{ t('pages.dashboard.usage.error', { error: usageError }) }}
+      </NAlert>
+    </NCard>
+
+    <!-- Stat Cards — with independent loading skeleton -->
+    <NGrid cols="1 s:2 m:3 l:5" responsive="screen" :x-gap="12" :y-gap="12">
+      <NGridItem v-for="(card, idx) in 5" :key="idx">
+        <!-- Skeleton shown while stats are loading -->
+        <div v-if="statsLoading" class="stat-card-skeleton">
+          <div class="skeleton-label" />
+          <div class="skeleton-value" />
         </div>
-      </NCard>
+        <!-- Real StatCard once loaded -->
+        <StatCard
+          v-else-if="idx === 0"
+          :title="t('pages.dashboard.stats.sessions')"
+          :value="stats.sessionCount"
+          :icon="ChatbubblesOutline"
+          color="#18a058"
+        />
+        <StatCard
+          v-else-if="idx === 1"
+          :title="t('pages.dashboard.stats.cronJobs')"
+          :value="stats.cronCount"
+          :icon="CalendarOutline"
+          color="#f0a020"
+        />
+        <StatCard
+          v-else-if="idx === 2"
+          :title="t('pages.dashboard.stats.models')"
+          :value="stats.modelCount"
+          :icon="SparklesOutline"
+          color="#2080f0"
+        />
+        <StatCard
+          v-else-if="idx === 3"
+          :title="t('pages.dashboard.stats.skills')"
+          :value="stats.installedSkills"
+          :icon="ExtensionPuzzleOutline"
+          color="#8b5cf6"
+        />
+        <StatCard
+          v-else
+          :title="t('pages.dashboard.stats.totalTokens')"
+          :value="tokenTotalDisplay"
+          :icon="FlashOutline"
+          color="#d03050"
+        />
+      </NGridItem>
+    </NGrid>
 
-      <NGrid cols="1 l:3" responsive="screen" :x-gap="12" :y-gap="12">
-        <NGridItem :span="2" class="usage-trend-item">
-          <NCard :title="t('pages.dashboard.cards.trend')" class="dashboard-card usage-trend-card">
-            <template #header-extra>
-              <NSpace :size="8" align="center">
-                <NTag size="small" :bordered="false" round type="info">
-                  {{ usageStartDate }} ~ {{ usageEndDate }}
-                </NTag>
-                <NTag size="small" :bordered="false" round>
-                  {{ usageMode === 'tokens' ? tokenTotalDisplay : costTotalDisplay }}
-                </NTag>
-              </NSpace>
-            </template>
+    <!-- KPIs Card — with independent loading -->
+    <NCard :title="t('pages.dashboard.cards.kpis')" class="dashboard-card">
+      <!-- KPI Skeleton -->
+      <div v-if="kpisLoading" class="kpi-grid">
+        <div v-for="n in 6" :key="n" class="kpi-card kpi-skeleton">
+          <div class="skeleton-label" />
+          <div class="skeleton-value" />
+          <div class="skeleton-hint" />
+        </div>
+      </div>
+      <!-- KPI Content -->
+      <div v-else class="kpi-grid">
+        <div v-for="kpi in usageKpis" :key="kpi.key" class="kpi-card">
+          <NText depth="3">{{ kpi.label }}</NText>
+          <div class="kpi-value">{{ kpi.value }}</div>
+          <NText depth="3" style="font-size: 12px;">{{ kpi.hint }}</NText>
+        </div>
+      </div>
+    </NCard>
 
-            <div class="trend-chart-panel">
-              <template v-if="trendGeometry.points.length">
-                <div class="trend-chart-canvas">
-                  <svg
-                    ref="trendSvgRef"
-                    class="trend-chart-svg"
-                    :viewBox="`0 0 ${trendGeometry.width} ${trendGeometry.height}`"
-                    preserveAspectRatio="none"
-                    @mousemove="handleTrendMouseMove"
-                    @mouseleave="clearTrendHover"
-                  >
-                    <g v-for="guide in trendGeometry.guides" :key="`guide-${guide.ratio}`">
-                      <line
-                        :x1="trendGeometry.left"
-                        :y1="guide.y"
-                        :x2="trendGeometry.left + trendGeometry.usableWidth"
-                        :y2="guide.y"
-                        class="trend-grid-line"
-                      />
-                      <text
-                        x="4"
-                        :y="guide.y + 4"
-                        class="trend-grid-label"
-                      >
-                        {{ formatUsageValue(guide.value) }}
-                      </text>
-                    </g>
+    <!-- Usage Trend + Structure Grid — each with independent loading -->
+    <NGrid cols="1 l:3" responsive="screen" :x-gap="12" :y-gap="12">
+      <NGridItem :span="2" class="usage-trend-item">
+        <NCard :title="t('pages.dashboard.cards.trend')" class="dashboard-card usage-trend-card">
+          <template #header-extra>
+            <NSpace :size="8" align="center">
+              <NTag size="small" :bordered="false" round type="info">
+                {{ usageStartDate }} ~ {{ usageEndDate }}
+              </NTag>
+              <NTag size="small" :bordered="false" round>
+                {{ usageMode === 'tokens' ? tokenTotalDisplay : costTotalDisplay }}
+              </NTag>
+            </NSpace>
+          </template>
 
-                    <path
-                      v-if="trendGeometry.areaPath"
-                      class="trend-area"
-                      :d="trendGeometry.areaPath"
-                    />
-                    <polyline
-                      v-if="trendGeometry.polyline"
-                      class="trend-line"
-                      :points="trendGeometry.polyline"
-                    />
+          <!-- Trend Skeleton -->
+          <div v-if="trendLoading" class="trend-chart-panel trend-skeleton">
+            <div class="trend-skeleton-bar" v-for="n in 7" :key="n" :style="{ height: `${20 + Math.random() * 60}%` }" />
+          </div>
+
+          <!-- Trend Content -->
+          <div v-else class="trend-chart-panel">
+            <template v-if="trendGeometry.points.length">
+              <div class="trend-chart-canvas">
+                <svg
+                  ref="trendSvgRef"
+                  class="trend-chart-svg"
+                  :viewBox="`0 0 ${trendGeometry.width} ${trendGeometry.height}`"
+                  preserveAspectRatio="none"
+                  @mousemove="handleTrendMouseMove"
+                  @mouseleave="clearTrendHover"
+                >
+                  <g v-for="guide in trendGeometry.guides" :key="`guide-${guide.ratio}`">
                     <line
-                      v-if="hoveredTrendPoint"
-                      class="trend-hover-line"
-                      :x1="hoveredTrendPoint.x"
-                      :y1="trendGeometry.top"
-                      :x2="hoveredTrendPoint.x"
-                      :y2="trendGeometry.top + trendGeometry.usableHeight"
+                      :x1="trendGeometry.left"
+                      :y1="guide.y"
+                      :x2="trendGeometry.left + trendGeometry.usableWidth"
+                      :y2="guide.y"
+                      class="trend-grid-line"
                     />
-                    <circle
-                      v-for="point in trendGeometry.points"
-                      :key="`point-${point.date}`"
-                      class="trend-point"
-                      :class="{ 'trend-point-active': hoveredTrendPoint?.date === point.date }"
-                      :cx="point.x"
-                      :cy="point.y"
-                      :r="hoveredTrendPoint?.date === point.date ? 6 : 3.5"
-                    />
-                  </svg>
+                    <text
+                      x="4"
+                      :y="guide.y + 4"
+                      class="trend-grid-label"
+                    >
+                      {{ formatUsageValue(guide.value) }}
+                    </text>
+                  </g>
 
-                  <div v-if="hoveredTrendPoint && trendTooltipStyle" class="trend-tooltip" :style="trendTooltipStyle">
-                    {{ hoveredTrendText }}
-                  </div>
-                </div>
+                  <path
+                    v-if="trendGeometry.areaPath"
+                    class="trend-area"
+                    :d="trendGeometry.areaPath"
+                  />
+                  <polyline
+                    v-if="trendGeometry.polyline"
+                    class="trend-line"
+                    :points="trendGeometry.polyline"
+                  />
+                  <line
+                    v-if="hoveredTrendPoint"
+                    class="trend-hover-line"
+                    :x1="hoveredTrendPoint.x"
+                    :y1="trendGeometry.top"
+                    :x2="hoveredTrendPoint.x"
+                    :y2="trendGeometry.top + trendGeometry.usableHeight"
+                  />
+                  <circle
+                    v-for="point in trendGeometry.points"
+                    :key="`point-${point.date}`"
+                    class="trend-point"
+                    :class="{ 'trend-point-active': hoveredTrendPoint?.date === point.date }"
+                    :cx="point.x"
+                    :cy="point.y"
+                    :r="hoveredTrendPoint?.date === point.date ? 6 : 3.5"
+                  />
+                </svg>
 
-                <div class="trend-axis-note">
-                  <span>{{ trendAxisLabels.start }}</span>
-                  <span>{{ trendAxisLabels.mid }}</span>
-                  <span>{{ trendAxisLabels.end }}</span>
+                <div v-if="hoveredTrendPoint && trendTooltipStyle" class="trend-tooltip" :style="trendTooltipStyle">
+                  {{ hoveredTrendText }}
                 </div>
-              </template>
-              <div v-else class="daily-empty">{{ t('pages.dashboard.trend.empty') }}</div>
+              </div>
+
+              <div class="trend-axis-note">
+                <span>{{ trendAxisLabels.start }}</span>
+                <span>{{ trendAxisLabels.mid }}</span>
+                <span>{{ trendAxisLabels.end }}</span>
+              </div>
+            </template>
+            <div v-else class="daily-empty">{{ t('pages.dashboard.trend.empty') }}</div>
+          </div>
+        </NCard>
+      </NGridItem>
+
+      <NGridItem :span="1" class="usage-structure-item">
+        <NCard :title="t('pages.dashboard.cards.structure')" class="dashboard-card usage-structure-card">
+          <!-- Structure Skeleton -->
+          <template v-if="structureLoading">
+            <NSpace justify="space-between" align="center" style="margin-bottom: 8px;">
+              <div class="skeleton-label" style="width: 80px;" />
+              <div class="skeleton-value" style="width: 60px;" />
+            </NSpace>
+            <div class="segment-track segment-skeleton">
+              <div v-for="n in 4" :key="n" class="segment-skeleton-bar" :style="{ width: `${15 + n * 15}%` }" />
             </div>
-          </NCard>
-        </NGridItem>
+            <div class="segment-list" style="margin-top: 10px;">
+              <div v-for="n in 4" :key="n" class="segment-row">
+                <div class="segment-row-label">
+                  <div class="skeleton-dot" />
+                  <div class="skeleton-label" style="width: 70px;" />
+                </div>
+                <div class="skeleton-value" style="width: 50px;" />
+              </div>
+            </div>
+          </template>
 
-        <NGridItem :span="1" class="usage-structure-item">
-          <NCard :title="t('pages.dashboard.cards.structure')" class="dashboard-card usage-structure-card">
+          <!-- Structure Content -->
+          <template v-else>
             <NSpace justify="space-between" align="center" style="margin-bottom: 8px;">
               <NText depth="3">{{ usageMode === 'tokens' ? t('pages.dashboard.usage.totalTokens') : t('pages.dashboard.usage.totalCost') }}</NText>
               <NText strong>{{ usageMode === 'tokens' ? tokenTotalDisplay : costTotalDisplay }}</NText>
@@ -925,79 +1046,100 @@ function viewModels() {
             <NText depth="3" style="display: block; margin-top: 8px; font-size: 12px;">
               {{ t('pages.dashboard.usage.missingCostEntries', { count: usageTotals.missingCostEntries }) }}
             </NText>
-          </NCard>
+          </template>
+        </NCard>
+      </NGridItem>
+    </NGrid>
+
+    <!-- Top Models / Providers / Tools — with independent loading -->
+    <NCard :title="t('pages.dashboard.cards.top')" class="dashboard-card">
+      <!-- Top Skeleton -->
+      <NGrid v-if="topLoading" cols="1 m:3" responsive="screen" :x-gap="12" :y-gap="12">
+        <NGridItem v-for="n in 3" :key="n">
+          <div class="top-pane-card">
+            <div class="top-title skeleton-label" style="width: 60px; margin-bottom: 8px;" />
+            <div class="top-list">
+              <div v-for="m in 4" :key="m" class="top-row">
+                <div class="top-row-main">
+                  <div class="skeleton-label" style="width: 55%;" />
+                  <div class="skeleton-value" style="width: 30%;" />
+                </div>
+                <div class="top-row-bar">
+                  <div class="top-row-bar-inner" :style="{ width: `${30 + m * 15}%` }" />
+                </div>
+              </div>
+            </div>
+          </div>
         </NGridItem>
       </NGrid>
 
-      <NCard :title="t('pages.dashboard.cards.top')" class="dashboard-card">
-        <NGrid cols="1 m:3" responsive="screen" :x-gap="12" :y-gap="12">
-          <NGridItem>
-            <div class="top-pane-card">
-              <div class="top-title">{{ t('pages.dashboard.top.models') }}</div>
-              <div v-if="topModels.length" class="top-list">
-                <div v-for="item in topModels" :key="`${item.provider || '-'}:${item.model || '-'}`" class="top-row">
-                  <div class="top-row-main">
-                    <span>{{ item.provider ? `${item.provider}/${item.model || '-'}` : item.model || '-' }}</span>
-                    <span>{{ usageMode === 'tokens' ? formatCompactNumber(item.totals.totalTokens) : formatUsd(item.totals.totalCost) }}</span>
-                  </div>
-                  <div class="top-row-bar">
-                    <div
-                      class="top-row-bar-inner top-row-bar-inner-model"
-                      :style="{ width: topBarWidth(usageMetric(item.totals), topModelMax) }"
-                    />
-                  </div>
+      <!-- Top Content -->
+      <NGrid v-else cols="1 m:3" responsive="screen" :x-gap="12" :y-gap="12">
+        <NGridItem>
+          <div class="top-pane-card">
+            <div class="top-title">{{ t('pages.dashboard.top.models') }}</div>
+            <div v-if="topModels.length" class="top-list">
+              <div v-for="item in topModels" :key="`${item.provider || '-'}:${item.model || '-'}`" class="top-row">
+                <div class="top-row-main">
+                  <span>{{ item.provider ? `${item.provider}/${item.model || '-'}` : item.model || '-' }}</span>
+                  <span>{{ usageMode === 'tokens' ? formatCompactNumber(item.totals.totalTokens) : formatUsd(item.totals.totalCost) }}</span>
+                </div>
+                <div class="top-row-bar">
+                  <div
+                    class="top-row-bar-inner top-row-bar-inner-model"
+                    :style="{ width: topBarWidth(usageMetric(item.totals), topModelMax) }"
+                  />
                 </div>
               </div>
-              <div v-else class="top-empty">{{ t('common.empty') }}</div>
             </div>
-          </NGridItem>
+            <div v-else class="top-empty">{{ t('common.empty') }}</div>
+          </div>
+        </NGridItem>
 
-          <NGridItem>
-            <div class="top-pane-card">
-              <div class="top-title">{{ t('pages.dashboard.top.providers') }}</div>
-              <div v-if="topProviders.length" class="top-list">
-                <div v-for="item in topProviders" :key="item.provider || 'unknown-provider'" class="top-row">
-                  <div class="top-row-main">
-                    <span>{{ item.provider || '-' }}</span>
-                    <span>{{ usageMode === 'tokens' ? formatCompactNumber(item.totals.totalTokens) : formatUsd(item.totals.totalCost) }}</span>
-                  </div>
-                  <div class="top-row-bar">
-                    <div
-                      class="top-row-bar-inner top-row-bar-inner-provider"
-                      :style="{ width: topBarWidth(usageMetric(item.totals), topProviderMax) }"
-                    />
-                  </div>
+        <NGridItem>
+          <div class="top-pane-card">
+            <div class="top-title">{{ t('pages.dashboard.top.providers') }}</div>
+            <div v-if="topProviders.length" class="top-list">
+              <div v-for="item in topProviders" :key="item.provider || 'unknown-provider'" class="top-row">
+                <div class="top-row-main">
+                  <span>{{ item.provider || '-' }}</span>
+                  <span>{{ usageMode === 'tokens' ? formatCompactNumber(item.totals.totalTokens) : formatUsd(item.totals.totalCost) }}</span>
+                </div>
+                <div class="top-row-bar">
+                  <div
+                    class="top-row-bar-inner top-row-bar-inner-provider"
+                    :style="{ width: topBarWidth(usageMetric(item.totals), topProviderMax) }"
+                  />
                 </div>
               </div>
-              <div v-else class="top-empty">{{ t('common.empty') }}</div>
             </div>
-          </NGridItem>
+            <div v-else class="top-empty">{{ t('common.empty') }}</div>
+          </div>
+        </NGridItem>
 
-          <NGridItem>
-            <div class="top-pane-card">
-              <div class="top-title">{{ t('pages.dashboard.top.tools') }}</div>
-              <div v-if="topTools.length" class="top-list">
-                <div v-for="item in topTools" :key="item.name" class="top-row">
-                  <div class="top-row-main">
-                    <span>{{ item.name }}</span>
-                    <span>{{ item.count }}</span>
-                  </div>
-                  <div class="top-row-bar">
-                    <div
-                      class="top-row-bar-inner top-row-bar-inner-tool"
-                      :style="{ width: topBarWidth(item.count, topToolMax) }"
-                    />
-                  </div>
+        <NGridItem>
+          <div class="top-pane-card">
+            <div class="top-title">{{ t('pages.dashboard.top.tools') }}</div>
+            <div v-if="topTools.length" class="top-list">
+              <div v-for="item in topTools" :key="item.name" class="top-row">
+                <div class="top-row-main">
+                  <span>{{ item.name }}</span>
+                  <span>{{ item.count }}</span>
+                </div>
+                <div class="top-row-bar">
+                  <div
+                    class="top-row-bar-inner top-row-bar-inner-tool"
+                    :style="{ width: topBarWidth(item.count, topToolMax) }"
+                  />
                 </div>
               </div>
-              <div v-else class="top-empty">{{ t('common.empty') }}</div>
             </div>
-          </NGridItem>
-        </NGrid>
-      </NCard>
-
-    </div>
-  </NSpin>
+            <div v-else class="top-empty">{{ t('common.empty') }}</div>
+          </div>
+        </NGridItem>
+      </NGrid>
+    </NCard>
+  </div>
 </template>
 
 <style scoped>
@@ -1080,6 +1222,99 @@ function viewModels() {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+}
+
+/* Skeleton base elements */
+.skeleton-label,
+.skeleton-value,
+.skeleton-hint,
+.skeleton-dot {
+  background: linear-gradient(90deg, var(--border-color) 25%, rgba(42,127,255,0.12) 50%, var(--border-color) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+.skeleton-label {
+  height: 12px;
+  width: 80px;
+}
+
+.skeleton-value {
+  height: 28px;
+  width: 60px;
+  margin: 6px 0 4px;
+}
+
+.skeleton-hint {
+  height: 10px;
+  width: 100px;
+}
+
+.skeleton-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Stat card skeleton */
+.stat-card-skeleton {
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  background: var(--bg-card);
+}
+
+/* KPI skeleton */
+.kpi-skeleton {
+  border: 1px dashed var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-card);
+  padding: 10px 12px;
+}
+
+/* Trend chart skeleton */
+.trend-skeleton {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px;
+  height: 250px;
+}
+
+.trend-skeleton-bar {
+  flex: 1;
+  background: linear-gradient(90deg, var(--border-color) 25%, rgba(42,127,255,0.12) 50%, var(--border-color) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: 4px 4px 0 0;
+  min-height: 20px;
+}
+
+/* Segment skeleton */
+.segment-skeleton {
+  display: flex;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  gap: 4px;
+  padding: 0;
+}
+
+.segment-skeleton-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--border-color) 25%, rgba(42,127,255,0.12) 50%, var(--border-color) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: 999px;
+  min-width: 4px;
 }
 
 .kpi-grid {
