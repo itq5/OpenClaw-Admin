@@ -25,6 +25,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import StatCard from '@/components/common/StatCard.vue'
 import { useWebSocketStore } from '@/stores/websocket'
+import { useRpcSafe } from '@/composables/useRpcSafe'
 import { formatRelativeTime } from '@/utils/format'
 import type {
   CostUsageSummary,
@@ -41,6 +42,7 @@ type UsageMode = 'tokens' | 'cost'
 
 const router = useRouter()
 const wsStore = useWebSocketStore()
+const rpc = useRpcSafe()
 const { t, locale } = useI18n()
 
 // Per-module loading states — each module loads independently
@@ -430,11 +432,11 @@ async function fetchStats() {
   statsLoading.value = true
   try {
     const [sessionsRes, cronsRes, modelsRes, skillsRes, configRes] = await Promise.allSettled([
-      wsStore.rpc.listSessions(),
-      wsStore.rpc.listCrons(),
-      wsStore.rpc.listModels(),
-      wsStore.rpc.listSkills(),
-      wsStore.rpc.getConfig(),
+      rpc.call(() => wsStore.rpc.listSessions(), { label: 'listSessions', timeout: 12000, retries: 1 }),
+      rpc.call(() => wsStore.rpc.listCrons(), { label: 'listCrons', timeout: 10000, retries: 0 }),
+      rpc.call(() => wsStore.rpc.listModels(), { label: 'listModels', timeout: 10000, retries: 0 }),
+      rpc.call(() => wsStore.rpc.listSkills(), { label: 'listSkills', timeout: 10000, retries: 0 }),
+      rpc.call(() => wsStore.rpc.getConfig(), { label: 'getConfig', timeout: 10000, retries: 0 }),
     ])
 
     const sessionList = sessionsRes.status === 'fulfilled' ? sessionsRes.value : []
@@ -456,15 +458,23 @@ async function fetchStats() {
 async function fetchUsageData() {
   // Fire usage fetches independently from stats
   const [usageRes, usageCostRes] = await Promise.allSettled([
-    wsStore.rpc.getSessionsUsage({
-      startDate: usageStartDate.value,
-      endDate: usageEndDate.value,
-      limit: 1000,
-    }),
-    wsStore.rpc.getUsageCost({
-      startDate: usageStartDate.value,
-      endDate: usageEndDate.value,
-    }),
+    rpc.call(
+      () =>
+        wsStore.rpc.getSessionsUsage({
+          startDate: usageStartDate.value,
+          endDate: usageEndDate.value,
+          limit: 1000,
+        }),
+      { label: 'getSessionsUsage', timeout: 20000, retries: 1 }
+    ),
+    rpc.call(
+      () =>
+        wsStore.rpc.getUsageCost({
+          startDate: usageStartDate.value,
+          endDate: usageEndDate.value,
+        }),
+      { label: 'getUsageCost', timeout: 15000, retries: 0 }
+    ),
   ])
 
   // Update all usage-derived modules at once when both resolve
