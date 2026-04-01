@@ -31,6 +31,7 @@ import { useConfigStore } from '@/stores/config'
 import { useSessionStore } from '@/stores/session'
 import { useSkillStore } from '@/stores/skill'
 import { useWebSocketStore } from '@/stores/websocket'
+import { useRpcSafe } from '@/composables/useRpcSafe'
 import { formatDate, formatRelativeTime, parseSessionKey, truncate } from '@/utils/format'
 import { renderSimpleMarkdown } from '@/utils/markdown'
 import type { AgentInstance, ChatMessage, ChatMessageContent, SessionsUsageSession, Skill } from '@/api/types'
@@ -43,6 +44,7 @@ const configStore = useConfigStore()
 const sessionStore = useSessionStore()
 const skillStore = useSkillStore()
 const wsStore = useWebSocketStore()
+const rpc = useRpcSafe()
 const { t, locale } = useI18n()
 
 const sessionKeyInput = ref('')
@@ -288,9 +290,8 @@ async function fetchSessionTokenUsage(rawKey: string) {
   sessionTokenUsageLoading.value = true
 
   try {
-    const usageResult = await wsStore.rpc.getSessionsUsage({
-      key,
-      limit: 1,
+    const usageResult = await rpc.call(() => wsStore.rpc.getSessionsUsage({ key, limit: 1 }), {
+      label: 'getSessionsUsage', timeout: 15000, retries: 0,
     })
     if (requestId !== sessionTokenUsageRequestId) return
 
