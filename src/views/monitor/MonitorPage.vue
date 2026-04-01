@@ -34,6 +34,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useRpcSafe } from '@/composables/useRpcSafe'
+import AsyncSection from '@/components/common/AsyncSection.vue'
 import { formatDate, formatRelativeTime } from '@/utils/format'
 import type {
   DeviceNode,
@@ -132,8 +133,11 @@ const updateTimeoutMs = ref<number | null>(180000)
 const updateLastTriggeredAt = ref<number | null>(null)
 const updateResponse = ref<UpdateRunResponse | null>(null)
 
-let presenceTimer: ReturnType<typeof setInterval> | null = null
-let logsTimer: ReturnType<typeof setInterval> | null = null
+// Single reactive object holding all polling timers — enables watch-based cleanup
+const pollingTimers = ref<{ presence: ReturnType<typeof setInterval> | null; logs: ReturnType<typeof setInterval> | null }>({
+  presence: null,
+  logs: null,
+})
 
 const connectionTagType = computed<'success' | 'warning' | 'error' | 'default'>(() => {
   if (wsStore.state === 'connected') return 'success'
@@ -596,11 +600,12 @@ async function saveApprovals() {
   approvalsError.value = ''
   try {
     const form = ensureApprovalsForm()
+    const baseHash = approvalsSnapshot.value!.hash
     const snapshot = await rpc.call(
       () =>
         wsStore.rpc.setExecApprovals({
           file: cloneJson(form),
-          baseHash: approvalsSnapshot.value.hash,
+          baseHash,
           nodeId: approvalsTargetKind.value === 'node' ? approvalsTargetNodeId.value : undefined,
         }),
       { label: 'setExecApprovals', timeout: 12000, retries: 1 }
@@ -813,23 +818,71 @@ watch([approvalsTargetKind, approvalsTargetNodeId], () => {
   approvalsError.value = ''
 })
 
-onMounted(() => {
-  void refreshOpsData()
-
-  presenceTimer = setInterval(() => {
+function startPresencePolling() {
+  stopPresencePolling()
+  pollingTimers.value.presence = setInterval(() => {
     if (activeTab.value !== 'presence') return
     void loadPresence(true)
   }, 8000)
+}
 
-  logsTimer = setInterval(() => {
-    if (!logsAutoFollow.value || activeTab.value !== 'logs') return
-    void loadLogs({ quiet: true })
-  }, 2000)
+function startLogsPolling() {
+  stopLogsPolling()
+  if (logsAutoFollow.value && activeTab.value === 'logs') {
+    pollingTimers.value.logs = setInterval(() => {
+      if (!logsAutoFollow.value || activeTab.value !== 'logs') return
+      void loadLogs({ quiet: true })
+    }, 2000)
+  }
+}
+
+function stopPresencePolling() {
+  if (pollingTimers.value.presence) {
+    clearInterval(pollingTimers.value.presence)
+    pollingTimers.value.presence = null
+  }
+}
+
+function stopLogsPolling() {
+  if (pollingTimers.value.logs) {
+    clearInterval(pollingTimers.value.logs)
+    pollingTimers.value.logs = null
+  }
+}
+
+onMounted(() => {
+  void refreshOpsData()
+  startPresencePolling()
+  startLogsPolling()
 })
 
 onUnmounted(() => {
-  if (presenceTimer) clearInterval(presenceTimer)
-  if (logsTimer) clearInterval(logsTimer)
+  stopPresencePolling()
+  stopLogsPolling()
+})
+
+// Start/stop the correct timer when user switches tabs — avoids wasteful background polling
+watch(activeTab, (tab) => {
+  if (tab === 'presence') {
+    startPresencePolling()
+  } else {
+    stopPresencePolling()
+  }
+  if (tab === 'logs') {
+    startLogsPolling()
+  } else {
+    stopLogsPolling()
+  }
+})
+
+// Restart logs polling when auto-follow toggles
+watch(logsAutoFollow, () => {
+  startLogsPolling()
+})
+
+onUnmounted(() => {
+  stopPresencePolling()
+  stopLogsPolling()
 })
 </script>
 
@@ -937,7 +990,21 @@ onUnmounted(() => {
               {{ t('pages.monitor.diag.hint') }}
             </NText>
 
-            <NSpin :show="diagLoading">
+            <AsyncSection
+              :loading="diagLoading"
+              :error="healthError || null"
+              error-label="诊断信息加载失败"
+              skeleton-height="180px"
+              @retry="loadHealthStatus()"
+            >
+              <template #skeleton>
+                <div class="diag-skeleton-grid">
+                  <div v-for="n in 6" :key="n" class="diag-skeleton-item">
+                    <div class="skeleton-label" style="width: 60px;" />
+                    <div class="skeleton-value" style="width: 80px;" />
+                  </div>
+                </div>
+              </template>
               <NGrid cols="1 s:2 m:3" responsive="screen" :x-gap="12" :y-gap="10">
                 <NGridItem>
                   <div class="ops-meta-item">
@@ -1002,10 +1069,15 @@ onUnmounted(() => {
                 {{ t('pages.monitor.diag.diagUpdatedAt', { time: formatRelativeTime(diagLastUpdatedAt) }) }}
                 <span v-if="diagLastProbeAt">{{ t('pages.monitor.diag.lastProbeAt', { time: formatRelativeTime(diagLastProbeAt) }) }}</span>
               </NText>
-            </NSpin>
+            </AsyncSection>
           </NCard>
 
-          <NSpin :show="presenceLoading">
+          <AsyncSection
+            :loading="presenceLoading"
+            :error="presenceError || null"
+            error-label="系统状态加载失败"
+            @retry="loadPresence()"
+          >
             <div class="presence-list">
               <div
                 v-for="(entry, index) in presenceEntries"
@@ -1049,7 +1121,7 @@ onUnmounted(() => {
                 style="padding: 48px 0;"
               />
             </div>
-          </NSpin>
+          </AsyncSection>
 
           <NText v-if="presenceLastUpdatedAt" depth="3" style="font-size: 12px;">
             {{ t('pages.monitor.presence.updatedAt', { time: formatDate(presenceLastUpdatedAt) }) }}
@@ -1146,7 +1218,12 @@ onUnmounted(() => {
             </NText>
           </NSpace>
 
-          <NSpin :show="logsLoading">
+          <AsyncSection
+            :loading="logsLoading"
+            :error="logsError || null"
+            error-label="日志加载失败"
+            @retry="loadLogs({ reset: true })"
+          >
             <NScrollbar ref="logScrollbarRef" class="logs-scroll">
               <div v-if="logsFilteredEntries.length === 0" class="logs-empty">
                 <NEmpty :description="t('pages.monitor.logs.empty')" />
@@ -1166,7 +1243,7 @@ onUnmounted(() => {
                 </div>
               </div>
             </NScrollbar>
-          </NSpin>
+          </AsyncSection>
         </NCard>
       </NTabPane>
 
@@ -1247,7 +1324,12 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <NSpin :show="approvalsLoading">
+          <AsyncSection
+            :loading="approvalsLoading"
+            :error="approvalsError || null"
+            error-label="审批配置加载失败"
+            @retry="loadApprovals()"
+          >
             <template v-if="approvalsForm">
               <NGrid cols="1 s:2 m:4" responsive="screen" :x-gap="12" :y-gap="10">
                 <NGridItem>
@@ -1410,7 +1492,7 @@ onUnmounted(() => {
               :description="t('pages.monitor.approvals.empty')"
               style="padding: 40px 0;"
             />
-          </NSpin>
+          </AsyncSection>
         </NCard>
       </NTabPane>
 
