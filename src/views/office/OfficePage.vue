@@ -275,8 +275,8 @@ async function handleCreateSessionSubmit() {
       peer: createForm.value.peer || undefined,
       label: createForm.value.label || undefined,
     })
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await sessionStore.fetchSessions()
+    // Refresh sessions in background — no artificial wait needed
+    sessionStore.fetchSessions()
     message.success(t('pages.sessions.list.createSuccess'))
     showCreateModal.value = false
   } catch (e: any) {
@@ -337,8 +337,8 @@ function formatSessionTokens(session: { tokenUsage?: { totalInput: number; total
 async function handleSpawnSession(sessionKey: string) {
   try {
     await sessionStore.newSession(sessionKey)
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await sessionStore.fetchSessions()
+    // No artificial wait — fetchSessions in background while chat loads
+    sessionStore.fetchSessions()
     officeStore.selectSession(sessionKey)
     chatStore.setSessionKey(sessionKey)
     await chatStore.fetchHistory(sessionKey)
@@ -361,8 +361,8 @@ function openCreateSessionModal() {
 async function handleDeleteSession(sessionKey: string) {
   try {
     await sessionStore.deleteSession(sessionKey)
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await sessionStore.fetchSessions()
+    // Optimistic UI update — fetchSessions in background
+    sessionStore.fetchSessions()
     message.success(t('pages.sessions.list.deleteSuccess'))
   } catch (e: any) {
     message.error(e?.message || t('pages.sessions.list.deleteFailed'))
@@ -395,8 +395,8 @@ async function handleCreateAgent() {
       name: createAgentForm.value.name.trim() || createAgentForm.value.id.trim(),
       workspace: createAgentForm.value.workspace.trim() || undefined,
     })
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await agentStore.fetchAgents()
+    // Refresh agents in background
+    agentStore.fetchAgents()
     message.success(t('pages.agents.messages.created'))
     showCreateAgentModal.value = false
   } catch (e: any) {
@@ -440,8 +440,8 @@ function handleOpenToolsModal(agentId: string) {
 async function handleDeleteAgent(agentId: string) {
   try {
     await agentStore.deleteAgent(agentId)
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await agentStore.fetchAgents()
+    // Refresh agents in background
+    agentStore.fetchAgents()
     message.success(t('pages.agents.messages.deleted'))
   } catch (e: any) {
     message.error(e?.message || t('pages.agents.messages.deleteFailed'))
@@ -458,8 +458,8 @@ async function handleSetIdentity() {
       emoji: identityForm.value.emoji || undefined,
       avatar: identityForm.value.avatar || undefined,
     })
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await agentStore.fetchAgents()
+    // Refresh agents in background
+    agentStore.fetchAgents()
     message.success(t('pages.agents.messages.identitySet'))
     showIdentityModal.value = false
   } catch (e: any) {
@@ -476,8 +476,8 @@ async function handleSetModel() {
       agentId: selectedAgentIdForAction.value,
       model: modelForm.value.model || undefined,
     })
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await agentStore.fetchAgents()
+    // Refresh agents in background
+    agentStore.fetchAgents()
     message.success(t('pages.agents.messages.modelSet'))
     showModelModal.value = false
   } catch (e: any) {
@@ -495,8 +495,8 @@ async function handleSetTools() {
       allow: toolsForm.value.allow.length > 0 ? toolsForm.value.allow : undefined,
       deny: toolsForm.value.deny.length > 0 ? toolsForm.value.deny : undefined,
     })
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    await agentStore.fetchAgents()
+    // Refresh agents in background
+    agentStore.fetchAgents()
     message.success(t('pages.agents.messages.toolsSet'))
     showToolsModal.value = false
   } catch (e: any) {
@@ -531,9 +531,13 @@ const teamCount = computed(() => {
 })
 
 onMounted(async () => {
-  await loadData()
-  if (sessionStore.sessions.length === 0) {
-    await sessionStore.fetchSessions()
+  // Load office data and sessions concurrently — no sequential blocking
+  const [loadDataResult] = await Promise.allSettled([
+    loadData(),
+    sessionStore.sessions.length === 0 ? sessionStore.fetchSessions() : Promise.resolve(),
+  ])
+  if (loadDataResult.status === 'rejected') {
+    console.error('[OfficePage] loadData failed:', loadDataResult.reason)
   }
   if (!officeStore.selectedAgentId && officeStore.officeAgents.length > 0) {
     const mainAgent = officeStore.officeAgents.find((a) => a.id === 'main')
@@ -561,8 +565,8 @@ watch(
       return agentStatus.phase
     }, async (newPhase, oldPhase) => {
       if (newPhase === 'done' && oldPhase !== 'done') {
-        await new Promise((resolve) => setTimeout(resolve, 500))
-        await sessionStore.fetchSessions()
+        // No artificial wait — refresh sessions immediately when agent finishes
+        sessionStore.fetchSessions()
       }
     })
     
