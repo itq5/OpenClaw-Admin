@@ -3427,7 +3427,8 @@ if (hasDist) {
 
   app.use((req, res, next) => {
     if (!req.path.startsWith('/api')) {
-      res.sendFile(join(distPath, 'index.html'))
+      // Use fs.readFileSync instead of sendFile to avoid express.static/send conflict
+      res.type('html').send(readFileSync(join(distPath, 'index.html')))
     } else {
       next()
     }

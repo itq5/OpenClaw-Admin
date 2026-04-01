@@ -2,8 +2,24 @@ import WebSocket from 'ws'
 import { randomUUID } from 'crypto'
 import EventEmitter from 'events'
 import { createHash, generateKeyPairSync, sign } from 'crypto'
+import { readFileSync } from 'fs'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
 
-const APP_VERSION = process.env.VITE_APP_VERSION || process.env.npm_package_version || ''
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+function resolveAppVersion() {
+  if (process.env.VITE_APP_VERSION) return process.env.VITE_APP_VERSION
+  if (process.env.npm_package_version) return process.env.npm_package_version
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8'))
+    if (pkg?.version) return pkg.version
+  } catch {}
+  return '0.0.0'
+}
+
+const APP_VERSION = resolveAppVersion()
 
 export class OpenClawGateway extends EventEmitter {
   constructor(url, authToken, authPassword) {
