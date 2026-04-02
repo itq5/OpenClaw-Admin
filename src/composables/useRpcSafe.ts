@@ -42,7 +42,7 @@ export interface RpcSafe {
   call<T>(rpc: () => Promise<T>, options?: RpcSafeOptions): Promise<T>
 }
 
-const DEFAULT_TIMEOUT_MS = 15_000
+const DEFAULT_TIMEOUT_MS = 60_000
 
 function isTransientError(error: unknown): boolean {
   if (error instanceof Error) {
