@@ -477,7 +477,7 @@ async function fetchUsageData() {
         wsStore.rpc.getSessionsUsage({
           startDate: usageStartDate.value,
           endDate: usageEndDate.value,
-          limit: 1000,
+          limit: 50,
         }),
       { label: 'getSessionsUsage', timeout: 0, retries: 1 }
     ),

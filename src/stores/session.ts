@@ -150,7 +150,7 @@ export const useSessionStore = defineStore('session', () => {
         const usage = await rpc.call(
           () =>
             wsStore.rpc.getSessionsUsage({
-              limit: Math.max(200, list.length * 4),
+              limit: Math.max(50, list.length * 2),
             }),
           { label: 'getSessionsUsage', timeout: 0, retries: 1 }
         )
