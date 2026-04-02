@@ -291,7 +291,7 @@ async function fetchSessionTokenUsage(rawKey: string) {
 
   try {
     const usageResult = await rpc.call(() => wsStore.rpc.getSessionsUsage({ key, limit: 1 }), {
-      label: 'getSessionsUsage', timeout: 15000, retries: 0,
+      label: 'getSessionsUsage', timeout: 60000, retries: 1,
     })
     if (requestId !== sessionTokenUsageRequestId) return
 
