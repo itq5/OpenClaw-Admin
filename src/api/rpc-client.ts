@@ -2021,7 +2021,7 @@ export class RPCClient {
       this.ws.send({ type: 'req', id, method, params }).catch((err) => {
         if (settled) return
         settled = true
-        clearTimeout(timer)
+        if (timer !== null) clearTimeout(timer)
         cleanup()
         reject(err)
       })

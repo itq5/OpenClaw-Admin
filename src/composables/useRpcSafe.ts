@@ -99,16 +99,22 @@ export function useRpcSafe(): RpcSafe {
 
     async function attempt(attemptNumber: number): Promise<T> {
       try {
-        const race = Promise.race([
-          rpc(),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error(`${label ? `[${label}] ` : ''}Call timed out after ${timeout}ms`)),
-              timeout
-            )
-          ),
-        ])
-        return await (race as Promise<T>)
+        let result: T
+        if (timeout > 0) {
+          const race = Promise.race([
+            rpc(),
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () => reject(new Error(`${label ? `[${label}] ` : ''}Call timed out after ${timeout}ms`)),
+                timeout
+              )
+            ),
+          ])
+          result = await (race as Promise<T>)
+        } else {
+          result = await rpc()
+        }
+        return result
       } catch (error) {
         const shouldRetry =
           attemptNumber <= retries &&
