@@ -152,7 +152,7 @@ export const useSessionStore = defineStore('session', () => {
             wsStore.rpc.getSessionsUsage({
               limit: Math.max(200, list.length * 4),
             }),
-          { label: 'getSessionsUsage', timeout: 60000, retries: 1 }
+          { label: 'getSessionsUsage', timeout: 0, retries: 1 }
         )
         sessions.value = mergeUsageIntoSessions(list, usage)
       } catch {

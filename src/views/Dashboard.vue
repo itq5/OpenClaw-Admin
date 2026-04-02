@@ -479,7 +479,7 @@ async function fetchUsageData() {
           endDate: usageEndDate.value,
           limit: 1000,
         }),
-      { label: 'getSessionsUsage', timeout: 60000, retries: 1 }
+      { label: 'getSessionsUsage', timeout: 0, retries: 1 }
     ),
     rpc.call(
       () =>
