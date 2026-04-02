@@ -12,7 +12,6 @@ import {
   NTag,
   NIcon,
   NButton,
-  NSpin,
   NAlert,
 } from 'naive-ui'
 import {
@@ -27,10 +26,13 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { formatRelativeTime } from '@/utils/format'
 import type { SystemMetrics, SystemPresenceEntry } from '@/api/types'
+import AsyncSection from '@/components/common/AsyncSection.vue'
+import { useRpcSafe } from '@/composables/useRpcSafe'
 
 const { t } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
+const rpc = useRpcSafe()
 
 const loading = ref(false)
 const error = ref('')
@@ -88,30 +90,23 @@ async function fetchMetrics() {
   loading.value = true
   error.value = ''
   try {
-    const token = authStore.token || localStorage.getItem('auth_token') || ''
-    const response = await fetch('/api/system/metrics', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    })
-    
-    if (response.status === 401) {
+    const data = await rpc.call(
+      () =>
+        fetch('/api/system/metrics', {
+          headers: {
+            Authorization: `Bearer ${authStore.token || localStorage.getItem('auth_token') || ''}`,
+          },
+        }).then((r) => r.json()),
+      { label: 'getSystemMetrics', timeout: 8000, retries: 1 }
+    )
+
+    if (!data) return
+
+    if (data.status === 401) {
       error.value = t('pages.system.authRequired')
       return
     }
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
-    
-    const text = await response.text()
-    let data
-    try {
-      data = JSON.parse(text)
-    } catch {
-      throw new Error(t('pages.system.loadFailed'))
-    }
-    
+
     if (!data.ok) {
       throw new Error(data.error?.message || t('pages.system.loadFailed'))
     }
@@ -163,7 +158,7 @@ onUnmounted(() => {
         {{ t('pages.system.subtitle') }}
       </NText>
 
-      <NSpin :show="loading && !metrics">
+      <AsyncSection :loading="loading && !metrics" error-title="Failed to load system metrics" @retry="fetchMetrics">
         <NGrid cols="1 s:2 m:4" responsive="screen" :x-gap="16" :y-gap="16">
           <NGridItem>
             <NCard size="small" embedded class="metric-card">
@@ -320,7 +315,7 @@ onUnmounted(() => {
             </NCard>
           </NGridItem>
         </NGrid>
-      </NSpin>
+      </AsyncSection>
 
       <NText v-if="lastUpdatedAt" depth="3" style="font-size: 12px; display: block; margin-top: 16px;">
         {{ t('pages.system.lastUpdated', { time: formatRelativeTime(lastUpdatedAt) }) }}
