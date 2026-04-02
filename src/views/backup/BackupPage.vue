@@ -7,7 +7,6 @@ import {
   NSpace,
   NText,
   NButton,
-  NSpin,
   NAlert,
   NDataTable,
   NPopconfirm,
@@ -38,12 +37,15 @@ import {
 import { useI18n } from 'vue-i18n'
 import { useBackupStore } from '@/stores/backup'
 import { useWebSocketStore } from '@/stores/websocket'
+import AsyncSection from '@/components/common/AsyncSection.vue'
+import { useRpcSafe } from '@/composables/useRpcSafe'
 import type { BackupItem, BackupTask } from '@/api/types/backup'
 
 const { t } = useI18n()
 const message = useMessage()
 const backupStore = useBackupStore()
 const wsStore = useWebSocketStore()
+const rpc = useRpcSafe()
 
 const showRestoreModal = ref(false)
 const selectedBackup = ref<string | null>(null)
@@ -379,7 +381,7 @@ onUnmounted(() => {
         </NCard>
       </div>
 
-      <NSpin :show="backupStore.loading">
+      <AsyncSection :loading="backupStore.loading" error-title="Failed to load backups" @retry="backupStore.fetchBackupList()">
         <NDataTable
           :columns="backupColumns"
           :data="backupStore.backupList"
@@ -396,7 +398,7 @@ onUnmounted(() => {
             </template>
           </NEmpty>
         </div>
-      </NSpin>
+      </AsyncSection>
     </NCard>
 
     <NCard v-if="recentTasks.length > 0" class="app-card">
