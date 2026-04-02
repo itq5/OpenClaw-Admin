@@ -9,7 +9,6 @@ import {
   NTag,
   NIcon,
   NButton,
-  NSpin,
   NAlert,
   NStatistic,
   NDataTable,
@@ -458,14 +457,12 @@ function formatTokens(num: number): string {
 }
 
 async function loadData() {
-  await agentStore.fetchAgents();
-  await agentStore.fetchModels();
-  if (!configStore.config) {
-    await configStore.fetchConfig();
-  }
-  if (sessionStore.sessions.length === 0) {
-    await sessionStore.fetchSessions();
-  }
+  await Promise.allSettled([
+    agentStore.fetchAgents(),
+    agentStore.fetchModels(),
+    configStore.fetchConfig(),
+    sessionStore.fetchSessions(),
+  ])
 }
 
 function openCreateModal() {
