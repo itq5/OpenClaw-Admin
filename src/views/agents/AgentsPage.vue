@@ -492,7 +492,7 @@ function openIdentityModal(agent: AgentInfo) {
 function openModelModal(agent: AgentInfo) {
   selectedAgent.value = agent;
   modelForm.value = {
-    model: "",
+    model: agent.model || "",
   };
   showModelModal.value = true;
 }
@@ -591,9 +591,10 @@ async function handleSetModel() {
 
   submitting.value = true;
   try {
+    const modelValue = modelForm.value.model;
     await agentStore.setAgentModel({
       agentId: selectedAgent.value.id,
-      model: modelForm.value.model || undefined,
+      model: modelValue || null,
     });
     message.success(t("pages.agents.messages.modelSaved"));
     showModelModal.value = false;

@@ -480,10 +480,10 @@ export const useAgentStore = defineStore("agent", () => {
     await fetchAgents();
   }
 
-  async function setAgentModel(params: { agentId: string; model?: string }) {
+  async function setAgentModel(params: { agentId: string; model?: string | null }) {
     await wsStore.rpc.updateAgent({
       agentId: params.agentId,
-      model: params.model,
+      model: params.model === null ? "" : params.model,
     });
     await fetchAgents();
   }
