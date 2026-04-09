@@ -1509,12 +1509,31 @@ watch(() => chatStore.messages, (newMessages, oldMessages) => {
   }
 }, { deep: true })
 
+function handleCodeCopy(event: Event) {
+  const target = event.target as HTMLElement
+  const button = target.closest('.code-copy-btn') as HTMLButtonElement
+  if (!button) return
+
+  const code = button.dataset.code || ''
+  navigator.clipboard.writeText(code).then(() => {
+    button.classList.add('copied')
+    button.title = 'Copied!'
+    setTimeout(() => {
+      button.classList.remove('copied')
+      button.title = 'Copy code'
+    }, 2000)
+  }).catch((err) => {
+    console.error('Failed to copy:', err)
+  })
+}
+
 onMounted(async () => {
   await officeStore.loadOfficeData()
   await sessionStore.fetchSessions()
   
   initCharacters()
   updatePositions()
+  document.addEventListener('click', handleCodeCopy)
   
   setTimeout(() => {
     centerScene()
@@ -1547,6 +1566,7 @@ onUnmounted(() => {
   if (animationFrame) cancelAnimationFrame(animationFrame)
   eventCleanups.forEach(cleanup => cleanup())
   eventCleanups.length = 0
+  document.removeEventListener('click', handleCodeCopy)
 })
 </script>
 

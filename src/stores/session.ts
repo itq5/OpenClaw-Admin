@@ -204,6 +204,7 @@ export const useSessionStore = defineStore('session', () => {
     channel?: string
     peer?: string
     label?: string
+    thread?: boolean
   }): Promise<string> {
     const result = await wsStore.rpc.spawnSession(params)
     return result.sessionKey

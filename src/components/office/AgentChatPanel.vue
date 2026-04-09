@@ -2030,12 +2030,31 @@ watch(
   { flush: 'post' }
 )
 
+function handleCodeCopy(event: Event) {
+  const target = event.target as HTMLElement
+  const button = target.closest('.code-copy-btn') as HTMLButtonElement
+  if (!button) return
+
+  const code = button.dataset.code || ''
+  navigator.clipboard.writeText(code).then(() => {
+    button.classList.add('copied')
+    button.title = 'Copied!'
+    setTimeout(() => {
+      button.classList.remove('copied')
+      button.title = 'Copy code'
+    }, 2000)
+  }).catch((err) => {
+    console.error('Failed to copy:', err)
+  })
+}
+
 onMounted(async () => {
   nowTimer = setInterval(() => {
     nowMs.value = Date.now()
   }, 1000)
 
   loadQuickReplies()
+  document.addEventListener('click', handleCodeCopy)
 
   eventCleanups.push(
     wsStore.subscribe('event', (evt: unknown) => {
@@ -2083,6 +2102,7 @@ onUnmounted(() => {
     clearInterval(nowTimer)
     nowTimer = null
   }
+  document.removeEventListener('click', handleCodeCopy)
 })
 
 watch(selectedSessionKey, async (newSessionKey) => {
