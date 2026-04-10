@@ -35,18 +35,18 @@
     </div>
 
     <!-- 筛选器 -->
-    <div v-if="filters.length > 0" class="filter-section">
+    <div v-if="filters && filters.length > 0" class="filter-section">
       <NDivider>{{ t('search.filters') }}</NDivider>
       
       <NSpace wrap size="large">
         <div v-for="filter in filters" :key="filter.key" class="filter-group">
-          <NText depth="3" style="margin-right: 8px;">{{ filter.label }}</NText>
+          <NText depth="3" style="margin-right: 8px;">{{ filter?.label }}</NText>
           
           <!-- 单选筛选 -->
           <NSelect
             v-if="filter.type === 'single'"
             v-model:value="filterValues[filter.key]"
-            :options="filter.options"
+            :options="filter.options as SelectMixedOption[]"
             :placeholder="filter.placeholder"
             size="small"
             style="width: 150px"
@@ -57,7 +57,7 @@
           <NSelect
             v-if="filter.type === 'multiple'"
             v-model:value="filterValues[filter.key]"
-            :options="filter.options"
+            :options="filter.options as SelectMixedOption[]"
             :placeholder="filter.placeholder"
             multiple
             size="small"
@@ -80,7 +80,7 @@
       </NSpace>
 
       <!-- 快速筛选标签 -->
-      <div v-if="quickFilters.length > 0" class="quick-filters">
+      <div v-if="quickFilters && quickFilters.length > 0" class="quick-filters">
         <NTag
           v-for="qf in quickFilters"
           :key="qf.key"
@@ -125,11 +125,17 @@ interface FilterOption {
   value: string | number
 }
 
+interface SelectMixedOption {
+  label: string
+  value: string | number
+  type?: string
+}
+
 interface FilterConfig {
   key: string
   label: string
   type: 'single' | 'multiple' | 'dateRange'
-  options?: FilterOption[]
+  options?: SelectMixedOption[]
   placeholder?: string
   placeholderStart?: string
   placeholderEnd?: string

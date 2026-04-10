@@ -6,14 +6,40 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **安全漏洞修复文档**：新增 `docs/SECURITY_VULNERABILITY_FIX.md`，详细记录高危安全漏洞（tar、sqlite3 依赖）的修复过程
+- **Cron 可视化编辑器文档完善**：
+  - 新增 `docs/requirements/004-cron-visual-editor.md` 详细需求文档
+  - 更新 `docs/REQUIREMENTS_CRON_EDITOR.md` 功能描述
+  - 补充用户故事、验收标准、技术依赖关系
 - 补充开源基础文档：`CONTRIBUTING.md`、`CHANGELOG.md`、`.env.example`
 
 ### Changed
 
+- **2026-04-11 文档更新**：
+  - 完善安全审计报告，补充漏洞修复状态跟踪
+  - 更新 CHANGELOG 记录本次文档变更
+  - README.md 补充安全说明章节
 - 修复 TypeScript strict/erasableSyntaxOnly 相关构建报错，`npm run build` 恢复通过
 - README 对齐当前产品能力与路由结构
 - `.gitignore` 增加 `.env*` 忽略规则并保留 `.env.example`
 - `.env.development` / `.env.production` 改为本地默认值模板
+
+### Security
+
+- ✅ 已修复高危漏洞：
+  - tar 包路径遍历漏洞（升级至 ≥6.2.0）
+  - sqlite3 包 SQL 注入风险（升级至 ≥5.1.7）
+  - Token 通过 Query 参数传递问题
+  - 任意 RPC 方法调用风险
+- ✅ 已加固中危问题：
+  - 登录暴力破解保护
+  - 登录审计日志
+  - CORS 配置增强
+  - 安全响应头添加
+  - 媒体路径遍历修复
+- ⚠️ 待优化项：
+  - 密码哈希升级为 argon2
+  - 单用户模式 RBAC 兼容性
 
 
 ## 2026-04-10 开发日志

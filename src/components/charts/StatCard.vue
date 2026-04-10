@@ -11,11 +11,11 @@
         <CountUp :value="value" :duration="1.5" />
       </div>
       <div class="stat-label">{{ label }}</div>
-      <div v-if="trend !== null" class="stat-trend" :class="trend >= 0 ? 'up' : 'down'">
+      <div v-if="trend !== null && trend !== undefined" class="stat-trend" :class="trend >= 0 ? 'up' : 'down'">
         <NIcon :size="12">
           <component :is="trend >= 0 ? ArrowUpOutline : ArrowDownOutline" />
         </NIcon>
-        {{ Math.abs(trend) }}%
+        {{ Math.abs(trend || 0) }}%
       </div>
     </div>
   </div>
