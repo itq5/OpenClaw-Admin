@@ -8,3 +8,9 @@ datasources:
     isDefault: true
     editable: true
     uid: prometheus-uid
+    jsonData:
+      timeInterval: "15s"
+      httpMethod: POST
+      manageAlerts: true
+      prometheusType: Prometheus
+      cacheLevel: "High"

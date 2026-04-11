@@ -2,13 +2,42 @@ global:
   resolve_timeout: 5m
 
 route:
-  group_by: ['alertname']
+  group_by: ['alertname', 'severity']
   group_wait: 10s
   group_interval: 10s
   repeat_interval: 1h
-  receiver: 'default-receiver'
+  receiver: 'feishu-webhook'
+  routes:
+    - match:
+        severity: critical
+      receiver: 'feishu-webhook-critical'
+      group_wait: 5s
+      repeat_interval: 30m
+    - match:
+        severity: warning
+      receiver: 'feishu-webhook'
+      group_wait: 10s
+      repeat_interval: 2h
 
 receivers:
   - name: 'default-receiver'
     webhook_configs:
-      - url: 'http://alertmanager:9093/webhook'
+      - url: 'http://alertmanager-webhook:8080/webhook'
+        send_resolved: true
+
+  - name: 'feishu-webhook'
+    webhook_configs:
+      - url: 'http://feishu-webhook:8080/webhook'
+        send_resolved: true
+
+  - name: 'feishu-webhook-critical'
+    webhook_configs:
+      - url: 'http://feishu-webhook:8080/webhook'
+        send_resolved: true
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']

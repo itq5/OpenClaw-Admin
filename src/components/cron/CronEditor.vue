@@ -139,9 +139,12 @@ import {
   NDatePicker,
   NGrid,
   NGridItem,
+  useMessage,
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { CronExpressionParser } from 'cron-parser'
+
+const message = useMessage()
 
 const cronParser = CronExpressionParser
 
@@ -335,7 +338,15 @@ function validateCron(): void {
   const expr = scheduleForm.value.cronExpression
   const parts = expr.split(' ')
   if (parts.length !== 5) {
-    // TODO: Show error
+    message.error(t('cron.editor.invalidCronExpression'))
+    return
+  }
+  try {
+    // 使用 cron-parser 验证表达式
+    CronExpressionParser.parse(expr)
+    message.success(t('cron.editor.cronExpressionValid'))
+  } catch (e) {
+    message.error(t('cron.editor.cronExpressionInvalid'))
   }
 }
 

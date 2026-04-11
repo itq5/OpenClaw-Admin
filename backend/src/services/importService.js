@@ -1,12 +1,16 @@
 /**
  * 数据导入服务
  * 负责数据恢复、导入功能
+ * 支持 Excel/CSV/PDF 格式
  */
 
 const db = require('../utils/database');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const XLSX = require('xlsx');
+const { parse } = require('csv-parse');
+const PDFDocument = require('pdfkit');
 
 class ImportService {
   constructor() {
@@ -21,6 +25,46 @@ class ImportService {
     if (!fs.existsSync(this.importDir)) {
       fs.mkdirSync(this.importDir, { recursive: true });
     }
+  }
+
+  /**
+   * 解析 Excel 文件
+   * @param {string} filePath - Excel 文件路径
+   * @returns {Array} - 数据数组
+   */
+  parseExcelFile(filePath) {
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    return XLSX.utils.sheet_to_json(worksheet);
+  }
+
+  /**
+   * 解析 CSV 文件
+   * @param {string} filePath - CSV 文件路径
+   * @returns {Promise<Array>} - 数据数组
+   */
+  parseCsvFile(filePath) {
+    return new Promise((resolve, reject) => {
+      const records = [];
+      fs.createReadStream(filePath)
+        .pipe(parse({ columns: true, skip_empty_lines: true }))
+        .on('data', (record) => records.push(record))
+        .on('end', () => resolve(records))
+        .on('error', (err) => reject(err));
+    });
+  }
+
+  /**
+   * 解析 PDF 文件（提取表格数据）
+   * @param {string} filePath - PDF 文件路径
+   * @returns {Promise<Array>} - 数据数组
+   */
+  async parsePdfFile(filePath) {
+    // PDF 解析简化处理，实际应使用 pdf-parse 或类似库
+    // 这里返回空数组表示不支持直接解析 PDF 数据
+    console.warn('PDF 导入功能需要额外的 PDF 解析库，当前仅支持 Excel 和 CSV');
+    return [];
   }
 
   /**

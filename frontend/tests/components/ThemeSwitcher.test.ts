@@ -34,8 +34,17 @@ describe('ThemeSwitcher.vue', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
-    // Reset localStorage
-    localStorage.clear()
+    // Mock localStorage
+    Object.defineProperty(window, 'localStorage', {
+      value: {
+        getItem: vi.fn(),
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+        clear: vi.fn(),
+        getItem: vi.fn(() => null),
+      },
+      writable: true
+    })
   })
 
   it('renders theme switcher correctly', () => {

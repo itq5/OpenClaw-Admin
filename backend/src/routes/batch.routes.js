@@ -29,6 +29,19 @@ router.patch('/:resource/status',
   batchController.batchUpdateStatus
 );
 
+// 批量查询
+router.post('/:resource/batch-get',
+  authenticate,
+  param('resource').isIn(['users', 'tasks', 'scenarios', 'audit-logs']),
+  body('ids').isArray({ min: 1 }).withMessage('至少需要一个 ID'),
+  body('fields').optional().isArray().withMessage('字段必须是数组'),
+  requirePermission((req, res) => {
+    const resource = req.params.resource;
+    return `${resource}:read`;
+  }),
+  batchController.batchGet
+);
+
 // 批量导出
 router.post('/:resource/export',
   authenticate,

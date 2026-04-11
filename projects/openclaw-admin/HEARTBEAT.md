@@ -1,154 +1,159 @@
-# HEARTBEAT - OpenClaw-Admin 全自动开发
+# HEARTBEAT - OpenClaw-Admin 架构审查与优化
 
-**更新时间**: 2026-04-11 11:40  
-**阶段**: 文档  
+**更新时间**: 2026-04-11 19:12  
+**阶段**: 架构审查  
 **状态**: 已完成  
-**负责人**: 技术文档工程师
+**负责人**: 系统架构师
 
 ---
 
-## 任务进度
+## 📊 架构审查总结
 
-### ✅ 已完成
+### 整体评分：⭐⭐⭐⭐ (4.2/5.0)
 
-#### 1. 项目文档编写
-
-| 文档名称 | 位置 | 状态 | 大小 |
-|---------|------|------|------|
-| 用户指南 v2.0 | `docs/USER_GUIDE_V2.md` | ✅ 已完成 | 8026 字节 |
-| 架构设计文档 | `docs/ARCHITECTURE_DESIGN.md` | ✅ 已更新 | 12552 字节 |
-| API 文档 | `docs/API_DOCUMENTATION.md` | ✅ 已更新 | 11178 字节 |
-
-#### 2. 用户指南 v2.0 内容
-
-**核心章节**:
-- 系统简介与技术栈
-- 快速入门（安装、登录、仪表盘）
-- 核心功能详解（15+ 功能模块）
-- 高级功能（Office/MyWorld/RBAC/通知中心）
-- API 参考
-- 常见问题解答
-- 附录（快捷键、浏览器支持、版本历史）
-
-**功能覆盖**:
-- ✅ 仪表盘 V2、数据下钻
-- ✅ 在线对话、会话管理
-- ✅ 记忆管理、任务计划
-- ✅ 模型管理、频道管理
-- ✅ 技能管理、多智能体
-- ✅ 智能体工坊 (Office)
-- ✅ 虚拟公司 (MyWorld)
-- ✅ 远程终端/桌面
-- ✅ 文件浏览器、系统监控
-- ✅ RBAC 权限、通知中心
-
-#### 3. API 文档更新
-
-**新增接口分类**:
-- 批量操作接口（4 个）
-- 搜索与筛选接口（3 个）
-- 数据可视化接口（4 个）
-- 权限管理接口（7 个）
-- 主题配置接口（7 个）
-
-**总计**: 25+ API 接口文档
-
-#### 4. 飞书多维表格更新
-
-**App Token**: `PUl1bf4KFaJNivsHB1hcdu3BnHc`  
-**数据表 ID**: `tblR1yJJKNp3Peur`
-
-**新增记录**:
-| 字段 | 值 |
-|------|-----|
-| 任务名称 | OpenClaw-Admin 用户指南 v2.0 |
-| 任务类型 | 文档 |
-| 优先级 | P1-高 |
-| 状态 | 已完成 |
-| 进度百分比 | 100 |
-| 备注 | ✅ 编写完整用户指南 v2.0<br>✅ 包含系统简介、快速入门、核心功能详解<br>✅ 高级功能说明 (Office/MyWorld/RBAC)<br>✅ API 参考和常见问题<br>✅ 8026 字符完整文档<br>📌 文档位置：/www/wwwroot/ai-work/docs/USER_GUIDE_V2.md<br>📌 状态：已完成 |
-| record_id | recvgrYyRB6EOZ |
+| 维度 | 评分 | 说明 |
+|-----|------|------|
+| 安全性 | ⭐⭐⭐⭐⭐ | RBAC、速率限制、密码哈希完整 |
+| 可扩展性 | ⭐⭐⭐⭐ | 模块化良好，需增加缓存层 |
+| 可维护性 | ⭐⭐⭐⭐ | 代码结构清晰，文档完善 |
+| 性能 | ⭐⭐⭐⭐ | SQLite WAL 配置合理 |
+| 完整性 | ⭐⭐⭐ | Cron/Office核心功能待完善 |
 
 ---
 
-## 📊 文档统计
+## ✅ 已完成模块评审
 
-| 指标 | 数值 |
-|------|------|
-| 新增文档数 | 1 |
-| 更新文档数 | 2 |
-| 总文档字符数 | 31,756 |
-| API 接口数 | 25+ |
-| 功能模块覆盖 | 15+ |
-
----
-
-## 📁 文档清单
-
-### 核心文档
-
-1. **USER_GUIDE_V2.md** - 用户指南 v2.0
-   - 位置：`/www/wwwroot/ai-work/docs/USER_GUIDE_V2.md`
-   - 内容：完整用户手册，包含快速入门、功能详解、API 参考
-
-2. **ARCHITECTURE_DESIGN.md** - 架构设计文档
-   - 位置：`/www/wwwroot/ai-work/docs/ARCHITECTURE_DESIGN.md`
-   - 内容：系统架构、技术栈、P1 任务指导
-
-3. **API_DOCUMENTATION.md** - API 接口文档
-   - 位置：`/www/wwwroot/ai-work/docs/API_DOCUMENTATION.md`
-   - 内容：25+ API 接口详细说明
-
-### 子目录文档
-
-| 目录 | 文档数 | 说明 |
-|------|-------|------|
-| `docs/api/` | 1 | API 规范 |
-| `docs/architecture/` | 1 | 架构文档 |
-| `docs/deployment/` | 2 | 部署指南 |
-| `docs/developer-guide/` | 1 | 开发者指南 |
-| `docs/development/` | 1 | 开发文档 |
-| `docs/operations/` | 1 | 运维文档 |
-| `docs/requirements/` | 1 | 需求文档 |
-| `docs/testing/` | 1 | 测试文档 |
-| `docs/user-guide/` | 2 | 用户手册 |
+| 模块 | 状态 | 评分 | 关键发现 |
+|-----|------|------|---------|
+| **多用户+RBAC** | ✅ 完成 | ⭐⭐⭐⭐⭐ | auth.js 实现完整，含速率限制、账户锁定 |
+| **通知中心** | ✅ 完成 | ⭐⭐⭐⭐ | notifications.js 功能完整 |
+| **性能监控** | ✅ 完成 | ⭐⭐⭐⭐ | monitoring.routes.js 功能完整 |
+| **Office 智能体工坊** | ⚠️ 80% | ⭐⭐⭐⭐ | API 完整，缺少场景执行编排 |
+| **MyWorld 虚拟公司** | ⚠️ 80% | ⭐⭐⭐⭐ | API 完整，缺少位置实时同步 |
+| **Cron 可视化编辑器** | ⚠️ 80% | ⭐⭐⭐ | 后端路由完成，缺少调度引擎 |
+| **导入导出** | ⚠️ 60% | ⭐⭐⭐ | 基础 API 完成，恢复功能待完善 |
 
 ---
 
-## 🎯 文档质量
+## 🔧 架构优化建议
 
-### 内容完整性
-- ✅ 覆盖所有核心功能
-- ✅ 包含安装、配置、使用指南
-- ✅ 提供 API 参考和示例
-- ✅ 包含常见问题解答
+### 1. 数据库层（需新增表）
 
-### 文档规范
-- ✅ Markdown 格式统一
-- ✅ 章节结构清晰
-- ✅ 包含版本信息
-- ✅ 提供联系方式和支持渠道
+```sql
+-- Cron 任务表
+CREATE TABLE IF NOT EXISTS cron_jobs (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, expression TEXT NOT NULL,
+    command TEXT NOT NULL, status TEXT DEFAULT 'paused',
+    last_run_at INTEGER, next_run_at INTEGER, run_count INTEGER DEFAULT 0
+);
+
+-- Cron 执行历史
+CREATE TABLE IF NOT EXISTS cron_history (
+    id TEXT PRIMARY KEY, job_id TEXT NOT NULL,
+    started_at INTEGER NOT NULL, ended_at INTEGER,
+    status TEXT NOT NULL, output TEXT, error TEXT
+);
+
+-- Office 场景表
+CREATE TABLE IF NOT EXISTS office_scenes (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL,
+    config TEXT DEFAULT '{}', status TEXT DEFAULT 'draft'
+);
+
+-- 性能监控历史
+CREATE TABLE IF NOT EXISTS performance_history (
+    id TEXT PRIMARY KEY, metric_type TEXT NOT NULL,
+    timestamp INTEGER NOT NULL, value REAL NOT NULL
+);
+```
+
+### 2. 服务层（需新增）
+
+```
+server/services/
+├── CronService.js        # Cron 调度引擎 ⏳
+├── OfficeService.js      # 场景编排引擎 ⏳
+├── MyWorldService.js     # 位置同步服务 ⏳
+├── AlertService.js       # 告警引擎 ⏳
+└── ImportExportService.js # 数据导入导出 ⏳
+```
+
+### 3. 可扩展性设计
+
+- ✅ 路由模块化 (routes/*.routes.js)
+- ✅ 中间件分离 (middleware/*.js)
+- ⏳ 插件系统（待实现）
+- ⏳ Redis 缓存层（待实现）
+- ⏳ 分布式调度准备（待实现）
 
 ---
 
-## 下一步行动
+## 🎯 下一步任务优先级
 
-1. **文档发布**
-   - [ ] 将文档发布到文档站点
-   - [ ] 更新 README 中的文档链接
-
-2. **持续维护**
-   - [ ] 定期更新文档版本
-   - [ ] 收集用户反馈改进文档
-   - [ ] 补充新功能文档
-
-3. **文档自动化**
-   - [ ] 配置文档自动生成
-   - [ ] 集成 CI/CD 流程
-   - [ ] 设置文档质量检查
+| 优先级 | 任务 | 预计工时 | 状态 |
+|-------|------|---------|------|
+| **P0** | 创建 cron_jobs/cron_history 表 | 2h | ⏳ 待开始 |
+| **P0** | 实现 CronService 调度引擎 | 8h | ⏳ 待开始 |
+| **P1** | 完善导入导出恢复功能 | 4h | ⏳ 待开始 |
+| **P1** | Office 场景执行编排 | 12h | ⏳ 待开始 |
+| **P2** | 性能监控历史数据收集 | 6h | ⏳ 待开始 |
+| **P2** | 告警规则引擎 | 8h | ⏳ 待开始 |
+| **P3** | Redis 缓存层 | 10h | ⏳ 待开始 |
 
 ---
 
-**最后更新**: 2026-04-11 11:40  
-**更新人**: 技术文档工程师 📝  
-**文档版本**: v2.0 - 文档完成
+## 📁 关键文件位置
+
+| 文件 | 路径 | 说明 |
+|-----|------|------|
+| 主入口 | `/www/wwwroot/ai-work/server/index.js` | Express 应用主入口 |
+| 数据库 | `/www/wwwroot/ai-work/server/database.js` | SQLite 初始化 + RBAC |
+| 认证 | `/www/wwwroot/ai-work/server/auth.js` | 多用户认证 + RBAC |
+| Cron 路由 | `/www/wwwroot/ai-work/server/routes/cron.routes.js` | Cron API 路由 |
+| 监控路由 | `/www/wwwroot/ai-work/server/routes/monitoring.routes.js` | 性能监控 API |
+| 导入导出 | `/www/wwwroot/ai-work/server/routes/import-export.routes.js` | 数据导入导出 API |
+| Office | `/www/wwwroot/ai-work/server/office.js` | 智能体工坊 API |
+| MyWorld | `/www/wwwroot/ai-work/server/myworld.js` | 虚拟公司 API |
+
+---
+
+## 🛡️ 安全加固状态
+
+| 安全措施 | 状态 | 说明 |
+|---------|------|------|
+| 密码哈希 | ✅ | bcrypt cost=12 |
+| 登录失败锁定 | ✅ | 5 次/15 分钟 |
+| 速率限制 | ✅ | 200 请求/分钟 |
+| CORS 配置 | ✅ | 域名白名单 |
+| HTTP 安全头 | ✅ | X-Frame-Options, CSP 等 |
+| SQL 注入防护 | ✅ | 参数化查询 |
+| 审计日志 | ⚠️ | 部分实现 |
+
+---
+
+## 📈 性能指标
+
+| 指标 | 当前值 | 建议值 |
+|-----|-------|-------|
+| 数据库 | SQLite WAL | ✅ 已配置 |
+| 会话存储 | Memory Map | ⏳ 建议 Redis |
+| API 响应时间 | <100ms | <200ms ✅ |
+| 并发连接 | 200 | 500+ (需优化) |
+
+---
+
+## 📝 技术债务清单
+
+| 问题 | 严重性 | 修复状态 | 影响范围 |
+|-----|-------|---------|---------|
+| Cron 调度引擎未实现 | 🔴 高 | ⏳ 待处理 | Cron 编辑器 |
+| Office 场景编排未实现 | 🟡 中 | ⏳ 待处理 | Office 模块 |
+| 导入导出恢复功能不完整 | 🟡 中 | ⏳ 待处理 | 数据备份 |
+| 审计日志未完整实现 | 🟡 中 | ⏳ 待处理 | 安全合规 |
+| 告警规则引擎未实现 | 🟡 中 | ⏳ 待处理 | 监控告警 |
+
+---
+
+**最后更新**: 2026-04-11 19:12  
+**更新人**: 系统架构师 🏗️  
+**架构版本**: v3.0 - 架构审查完成

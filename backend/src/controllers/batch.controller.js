@@ -180,9 +180,62 @@ async function batchAssign(req, res) {
   }
 }
 
+// 批量查询
+async function batchGet(req, res) {
+  try {
+    const { resource } = req.params;
+    const { ids, fields } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, error: '无效的请求参数' });
+    }
+
+    const idPlaceholders = ids.map(() => '?').join(',');
+    let tableName;
+    
+    switch (resource) {
+      case 'users': tableName = 'users'; break;
+      case 'tasks': tableName = 'tasks'; break;
+      case 'scenarios': tableName = 'scenarios'; break;
+      case 'audit-logs': tableName = 'audit_logs'; break;
+      default:
+        return res.status(400).json({ success: false, error: '无效的资源类型' });
+    }
+
+    // 构建 SELECT 字段列表
+    let selectFields = '*';
+    if (fields && Array.isArray(fields) && fields.length > 0) {
+      // 只允许安全的字段名
+      const allowedFields = ['id', 'name', 'email', 'status', 'title', 'description', 'created_at', 'updated_at', 'assignee_id', 'type'];
+      const safeFields = fields.filter(f => allowedFields.includes(f));
+      if (safeFields.length > 0) {
+        selectFields = safeFields.join(', ');
+      }
+    }
+
+    const sql = `SELECT ${selectFields} FROM ${tableName} WHERE id IN (${idPlaceholders})`;
+    const data = await query(sql, ids);
+
+    logger.info(`批量查询 ${resource}: 查询到 ${data.length} 条记录`);
+
+    res.json({
+      success: true,
+      data,
+      count: data.length
+    });
+  } catch (error) {
+    logger.error('批量查询失败:', error.message);
+    res.status(500).json({
+      success: false,
+      error: '批量查询失败'
+    });
+  }
+}
+
 module.exports = {
   batchDelete,
   batchUpdateStatus,
   batchExport,
-  batchAssign
+  batchAssign,
+  batchGet
 };
