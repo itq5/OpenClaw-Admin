@@ -24,6 +24,10 @@ export class ApiClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private _state: ConnectionState = ConnectionState.DISCONNECTED
   private clientId: string | null = null
+  private closing = false
+  private readonly handlePageHide = () => {
+    this.closeEventSource(true)
+  }
 
   get state(): ConnectionState {
     return this._state
@@ -31,6 +35,9 @@ export class ApiClient {
 
   constructor(config?: Partial<ApiClientConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', this.handlePageHide)
+    }
   }
 
   connect(): void {
@@ -43,30 +50,32 @@ export class ApiClient {
   disconnect(): void {
     this.clearTimers()
     this._state = ConnectionState.DISCONNECTED
-    if (this.eventSource) {
-      this.eventSource.close()
-      this.eventSource = null
-    }
+    this.closeEventSource(true)
     this.emit('stateChange', ConnectionState.DISCONNECTED)
+  }
+
+  dispose(): void {
+    this.disconnect()
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pagehide', this.handlePageHide)
+    }
   }
 
   private createEventSource(): void {
     try {
-      let url = this.config.baseUrl
+      const url = this.config.baseUrl
         ? `${this.config.baseUrl}/api/events`
         : '/api/events'
 
-      const token = this.config.getToken()
-      if (token) {
-        url += `?token=${encodeURIComponent(token)}`
-      }
-
       console.log('[ApiClient] Creating EventSource:', url)
 
+      this.closeEventSource(true)
+      this.closing = false
       this.eventSource = new EventSource(url)
 
       this.eventSource.onopen = () => {
         console.log('[ApiClient] EventSource opened')
+        this.closing = false
         this.reconnectAttempts = 0
       }
 
@@ -75,6 +84,9 @@ export class ApiClient {
       }
 
       this.eventSource.onerror = (error) => {
+        if (this.closing || this._state === ConnectionState.DISCONNECTED) {
+          return
+        }
         console.error('[ApiClient] EventSource error:', error)
         console.error('[ApiClient] EventSource readyState:', this.eventSource?.readyState)
         this.handleDisconnect()
@@ -98,10 +110,15 @@ export class ApiClient {
 
         case 'gatewayState':
           console.log('[ApiClient] Gateway state:', message.state, 'version:', message.version)
+          const connectedPayload = {
+            version: message.version,
+            updateAvailable: message.updateAvailable,
+            features: message.features,
+          }
           if (message.state === 'connected') {
             this._state = ConnectionState.CONNECTED
             this.emit('stateChange', ConnectionState.CONNECTED)
-            this.emit('connected', { version: message.version, updateAvailable: message.updateAvailable })
+            this.emit('connected', connectedPayload)
           } else if (message.state === 'disconnected' || message.state === 'failed') {
             if (this._state === ConnectionState.CONNECTED) {
               this._state = ConnectionState.RECONNECTING
@@ -110,9 +127,6 @@ export class ApiClient {
           } else if (message.state === 'connecting') {
             this._state = ConnectionState.CONNECTING
             this.emit('stateChange', ConnectionState.CONNECTING)
-          }
-          if (message.version || message.updateAvailable) {
-            this.emit('connected', { version: message.version, updateAvailable: message.updateAvailable })
           }
           break
 
@@ -137,11 +151,8 @@ export class ApiClient {
 
   private handleDisconnect(): void {
     console.log('[ApiClient] Disconnected, current state:', this._state)
-    
-    if (this.eventSource) {
-      this.eventSource.close()
-      this.eventSource = null
-    }
+
+    this.closeEventSource(false)
 
     this.emit('disconnected', 0, 'SSE disconnected')
 
@@ -188,6 +199,14 @@ export class ApiClient {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
+    }
+  }
+
+  private closeEventSource(intentional: boolean): void {
+    this.closing = intentional
+    if (this.eventSource) {
+      this.eventSource.close()
+      this.eventSource = null
     }
   }
 

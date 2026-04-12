@@ -96,6 +96,12 @@ export class OpenClawWebSocket {
     this.emit('stateChange', ConnectionState.DISCONNECTED)
   }
 
+  dispose(): void {
+    this.disconnect()
+    this.apiClient.dispose()
+    this.listeners.clear()
+  }
+
   async send(data: RPCFrame): Promise<void> {
     if (data.type !== 'req') {
       return
