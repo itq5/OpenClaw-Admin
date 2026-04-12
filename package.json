@@ -5,12 +5,21 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
+    "i18n:generate": "node scripts/generate-i18n-resources.mjs",
+    "predev": "npm run i18n:generate",
     "dev": "vite",
+    "predev:all": "npm run i18n:generate",
     "dev:server": "node --env-file=.env server/index.js",
     "dev:all": "concurrently -n \"frontend,backend\" -c \"blue,green\" \"vite\" \"node --env-file=.env server/index.js\"",
+    "prebuild": "npm run i18n:generate",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "start": "node --env-file=.env server/index.js"
+    "start": "node --env-file=.env server/index.js",
+    "pretest": "npm run i18n:generate",
+    "test": "vitest run",
+    "pretest:watch": "npm run i18n:generate",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.2.0",
@@ -49,6 +58,7 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@intlify/unplugin-vue-i18n": "^11.0.7",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^24.10.1",
     "@vitejs/plugin-vue": "^6.0.2",

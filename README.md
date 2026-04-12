@@ -287,6 +287,18 @@ npm run dev:all
 
 访问 `http://localhost:3000` 进入管理界面。
 
+> Windows 本机首次跑通建议
+>
+> 如果当前机器上的 `3001` 已被其他服务占用，建议先使用本地生产式启动而不是开发模式：
+>
+> 1. 在 `.env` 中将 `PORT` 设为 `3000`
+> 2. 将 `DEV_PORT` 预留为 `3002`
+> 3. 执行 `npm run build`
+> 4. 执行 `npm run start`
+> 5. 访问 `http://localhost:3000`
+>
+> 确认可以正常登录并连接 Gateway 后，再按需切换到 `npm run dev`。
+
 ### 生产构建
 
 ```bash
@@ -452,6 +464,14 @@ AUTH_USERNAME=
 AUTH_PASSWORD=
 MEDIA_DIR=
 # OPENCLAW_HOME=/path/to/.openclaw
+```
+
+如果是 Windows 本机首次使用，并且 `3001` 已被占用，可改为：
+
+```env
+PORT=3000
+DEV_PORT=3002
+DEV_FRONTEND_URL=http://localhost:3002
 ```
 
 ***

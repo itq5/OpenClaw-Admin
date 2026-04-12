@@ -28,6 +28,7 @@ import {
   InformationCircleOutline,
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth'
 import { useRemoteDesktopStore } from '@/stores/remote-desktop'
 import { useWebSocketStore } from '@/stores/websocket'
 import type { RemoteDesktopNode } from '@/api/types'
@@ -36,6 +37,7 @@ import NodeSelector from './components/NodeSelector.vue'
 
 const message = useMessage()
 const { t } = useI18n()
+const authStore = useAuthStore()
 const desktopStore = useRemoteDesktopStore()
 const wsStore = useWebSocketStore()
 
@@ -79,6 +81,20 @@ const connectionLabel = computed(() => {
   return t('pages.remoteDesktop.status.disconnected')
 })
 
+function buildAuthHeaders(includeJson = false): Record<string, string> {
+  const headers: Record<string, string> = {}
+  if (includeJson) {
+    headers['Content-Type'] = 'application/json'
+  }
+
+  const token = authStore.getToken()
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
+  return headers
+}
+
 async function loadNodes() {
   if (nodesLoading.value) return
   nodesLoading.value = true
@@ -105,9 +121,7 @@ async function loadDisplays() {
   displaysLoading.value = true
   try {
     const response = await fetch('/api/desktop/displays', {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
-      },
+      headers: buildAuthHeaders(),
     })
     const result = await response.json()
     if (result.ok) {
@@ -171,9 +185,7 @@ function handleMouseMove(x: number, y: number) {
   if (!desktopStore.isConnected || !desktopStore.currentSession) return
   fetch('/api/desktop/input/mouse', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: buildAuthHeaders(true),
     body: JSON.stringify({
       sessionId: desktopStore.currentSession.id,
       x,
@@ -188,9 +200,7 @@ function handleMouseClick(x: number, y: number, button: number) {
   if (!desktopStore.isConnected || !desktopStore.currentSession) return
   fetch('/api/desktop/input/mouse', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: buildAuthHeaders(true),
     body: JSON.stringify({
       sessionId: desktopStore.currentSession.id,
       x,
@@ -205,9 +215,7 @@ function handleMouseWheel(x: number, y: number, deltaX: number, deltaY: number) 
   if (!desktopStore.isConnected || !desktopStore.currentSession) return
   fetch('/api/desktop/input/mouse', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: buildAuthHeaders(true),
     body: JSON.stringify({
       sessionId: desktopStore.currentSession.id,
       x,
