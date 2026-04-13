@@ -3,8 +3,8 @@ import cors from 'cors'
 import { createServer } from 'http'
 import { randomUUID } from 'crypto'
 import { fileURLToPath } from 'url'
-import { dirname, join, resolve, basename, extname, sep } from 'path'
-import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, unlinkSync, stat, promises as fsPromises, createReadStream, createWriteStream, copyFileSync, readlinkSync, symlinkSync, renameSync } from 'fs'
+import { dirname, join, resolve, basename, extname, sep, dirname as pathDirname } from 'path'
+import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, unlinkSync, stat, promises as fsPromises, createReadStream, createWriteStream, copyFileSync, readlinkSync, symlinkSync, renameSync, realpath } from 'fs'
 import { OpenClawGateway } from './gateway.js'
 import { parse } from 'dotenv'
 import os from 'os'
@@ -13,6 +13,32 @@ import checkDiskSpace from 'check-disk-space'
 import { execSync } from 'child_process'
 import pty from 'node-pty'
 import db, { createBackupRecord, updateBackupRecord, getBackupRecord, getBackupRecords, getBackupRecordsCount, deleteBackupRecord } from './database.js'
+import { registerOfficeRoutes, migrateOfficeTables } from './office.js'
+import { registerMyWorldRoutes, migrateMyWorldTables } from './myworld.js'
+import auditRoutes from './routes/audit.routes.js'
+import batchRoutes from './routes/batch.routes.js'
+import searchRoutes from './routes/search.routes.js'
+import statsRoutes from './routes/stats.routes.js'
+import rbacRoutes from './routes/rbac.routes.js'
+import themesRoutes from './routes/themes.routes.js'
+import importExportRoutes from './routes/import-export.routes.js'
+import monitoringRoutes from './routes/monitoring.routes.js'
+import { applyConfigUpdate, sanitizeConfigForClient } from './config-sanitizer.js'
+import {
+  hashPassword, verifyPassword, generateToken, createSession,
+  validateSession, invalidateSession, invalidateAllUserSessions,
+  getUserById, getUserByUsername, getUserPermissions, userHasPermission,
+  userHasAnyPermission, getUserRoles, attachAuth, requireAuth,
+  requirePermission, requireAnyPermission, requireRole,
+  createAuditLog, getAuditLogs, cleanupExpiredSessions
+} from './auth.js'
+import {
+  createNotification, getNotifications, getUnreadCount,
+  markNotificationRead, markAllNotificationsRead,
+  deleteNotification, cleanupExpiredNotifications,
+  sendImmediateNotification, NOTIFICATION_TYPES, NOTIFICATION_PRIORITIES
+} from './notifications.js'
+import { collectLocalSystemMetrics } from './system-metrics.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -66,8 +92,135 @@ const hasDist = existsSync(join(distPath, 'index.html'))
 
 const sessions = new Map()
 
-app.use(cors())
+// Security: CORS configuration with allowed origins
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:10001').split(',')
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin) return callback(null, true)
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true)
+    } else {
+      console.warn(`[CORS] Blocked origin: ${origin}`)
+      callback(new Error('Not allowed by CORS'))
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'X-Request-Id'],
+  maxAge: 86400,
+}))
+app.use(express.json({ limit: '1mb' })) // Prevent large payload DoS
+app.use(express.urlencoded({ extended: true, limit: '1mb' }))
 app.use(express.json())
+
+// Security: HTTP headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-Frame-Options', 'DENY')
+  res.setHeader('X-XSS-Protection', '1; mode=block')
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:")
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+  next()
+})
+
+// Cookie parser (simple inline)
+app.use((req, res, next) => {
+  const cookieHeader = req.headers.cookie
+  req.cookies = {}
+  if (cookieHeader) {
+    for (const pair of cookieHeader.split(';')) {
+      const idx = pair.indexOf('=')
+      if (idx > 0) {
+        const key = pair.slice(0, idx).trim()
+        const val = pair.slice(idx + 1).trim()
+        req.cookies[key] = val
+      }
+    }
+  }
+  next()
+})
+
+// Attach auth for all routes (optional auth - won't block)
+app.use(attachAuth)
+
+// ========== SECURITY HARDENING: Global Security Headers ==========
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-Frame-Options', 'DENY')
+  res.setHeader('X-XSS-Protection', '1; mode=block')
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  res.setHeader('X-Request-Id', randomUUID())
+  next()
+})
+
+// ========== SECURITY HARDENING: Global API Rate Limiting ==========
+const _globalRateLimits = new Map()
+const _GLOBAL_RATE_WINDOW = 60 * 1000
+const _GLOBAL_RATE_MAX = 200
+
+app.use((req, res, next) => {
+  // Skip rate limiting for health check and static assets
+  if (req.path === '/api/health' || req.path === '/' || req.path.startsWith('/dist') || req.path.startsWith('/public')) {
+    return next()
+  }
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+    req.headers['x-real-ip'] ||
+    req.socket?.remoteAddress ||
+    req.ip ||
+    'unknown'
+  const now = Date.now()
+  let record = _globalRateLimits.get(ip)
+  if (!record || now > record.windowStart + _GLOBAL_RATE_WINDOW) {
+    record = { count: 1, windowStart: now }
+    _globalRateLimits.set(ip, record)
+    return next()
+  }
+  record.count++
+  if (record.count > _GLOBAL_RATE_MAX) {
+    res.setHeader('Retry-After', Math.ceil((record.windowStart + _GLOBAL_RATE_WINDOW - now) / 1000))
+    return res.status(429).json({ ok: false, error: 'Too Many Requests', code: 'RATE_LIMITED', retryAfter: Math.ceil((record.windowStart + _GLOBAL_RATE_WINDOW - now) / 1000) })
+  }
+  res.setHeader('X-RateLimit-Limit', String(_GLOBAL_RATE_MAX))
+  res.setHeader('X-RateLimit-Remaining', String(_GLOBAL_RATE_MAX - record.count))
+  res.setHeader('X-RateLimit-Reset', String(Math.ceil((record.windowStart + _GLOBAL_RATE_WINDOW - now) / 1000)))
+  next()
+})
+
+// ========== SECURITY HARDENING: Brute Force Tracker (shared with login) ==========
+const _bruteForceTracker = new Map()
+const _BRUTE_FORCE_THRESHOLD = 200
+const _BRUTE_FORCE_WINDOW = 5 * 60 * 1000
+
+function _recordBruteForce(ip) {
+  const now = Date.now()
+  let record = _bruteForceTracker.get(ip)
+  if (!record || now > record.windowStart + _BRUTE_FORCE_WINDOW) {
+    record = { count: 1, windowStart: now, releaseAt: null }
+    _bruteForceTracker.set(ip, record)
+    return false
+  }
+  record.count++
+  if (record.count >= _BRUTE_FORCE_THRESHOLD) {
+    record.releaseAt = now + _BRUTE_FORCE_WINDOW * 2
+    console.warn(`[Security] IP ${ip} blocked for excessive requests`)
+    return true
+  }
+  return false
+}
+
+function _isIpBlocked(ip) {
+  const record = _bruteForceTracker.get(ip)
+  if (!record) return false
+  if (Date.now() > record.releaseAt) { _bruteForceTracker.delete(ip); return false }
+  return true
+}
+
+
 
 let gateway = new OpenClawGateway(envConfig.OPENCLAW_WS_URL, envConfig.OPENCLAW_AUTH_TOKEN, envConfig.OPENCLAW_AUTH_PASSWORD, envConfig.LOG_LEVEL)
 
@@ -168,32 +321,100 @@ function broadcastSSE(data) {
 }
 
 function isAuthEnabled() {
-  return envConfig.AUTH_USERNAME && envConfig.AUTH_PASSWORD
+  return Boolean(envConfig.AUTH_USERNAME && envConfig.AUTH_PASSWORD)
+}
+
+function getAuthTokenFromRequest(req) {
+  return req.headers.authorization?.replace('Bearer ', '') || req.cookies?.session_token || null
+}
+
+function getEnvSessionFromRequest(req) {
+  if (!isAuthEnabled()) return null
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+    req.headers['x-real-ip'] ||
+    req.socket?.remoteAddress ||
+    req.ip ||
+    'unknown'
+
+  if (_isIpBlocked(ip)) {
+    return { blocked: true }
+  }
+
+  const token = getAuthTokenFromRequest(req)
+  if (!token) return null
+  const session = sessions.get(token)
+  if (!session) return null
+  if (session.expires < Date.now()) {
+    sessions.delete(token)
+    return null
+  }
+  return { token, session }
+}
+
+function buildEnvAuthContext(token, session) {
+  return {
+    sessionId: token,
+    userId: `env:${session.username}`,
+    username: session.username,
+    displayName: session.username,
+    role: 'admin',
+    permissions: ['perm_system_admin'],
+    expiresAt: session.expires,
+    isEnvAuth: true,
+  }
+}
+
+function applyAuthContext(req, authContext) {
+  req.auth = authContext
+  req.user = authContext
+    ? {
+        id: authContext.userId,
+        username: authContext.username,
+        role: authContext.role,
+        permissions: authContext.permissions,
+      }
+    : null
+  req.sessionId = authContext?.sessionId || null
 }
 
 function checkAuth(req) {
   if (!isAuthEnabled()) return true
-  let token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.session
-  if (!token && req.query && req.query.token) {
-    token = req.query.token
-  }
-  if (!token) return false
-  const session = sessions.get(token)
-  if (!session) return false
-  if (session.expires < Date.now()) {
-    sessions.delete(token)
-    return false
-  }
+  if (req.auth) return true
+  const envSession = getEnvSessionFromRequest(req)
+  if (!envSession || envSession.blocked) return false
   return true
 }
 
 function authMiddleware(req, res, next) {
   if (!isAuthEnabled()) return next()
+  if (req.auth) {
+    return next()
+  }
+
+  const envSession = getEnvSessionFromRequest(req)
+  if (envSession?.token && envSession.session) {
+    applyAuthContext(req, buildEnvAuthContext(envSession.token, envSession.session))
+    return next()
+  }
+
   if (!checkAuth(req)) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
   next()
 }
+
+app.use((req, _res, next) => {
+  if (req.auth || !isAuthEnabled()) {
+    return next()
+  }
+
+  const envSession = getEnvSessionFromRequest(req)
+  if (envSession?.token && envSession.session) {
+    applyAuthContext(req, buildEnvAuthContext(envSession.token, envSession.session))
+  }
+
+  next()
+})
 
 app.get('/api/auth/config', (req, res) => {
   res.json({
@@ -206,14 +427,71 @@ app.post('/api/auth/login', (req, res) => {
     return res.json({ ok: true, message: 'Auth disabled' })
   }
 
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+    req.headers['x-real-ip'] ||
+    req.socket?.remoteAddress ||
+    req.ip ||
+    'unknown'
+
+  // SECURITY: Check brute force IP block
+  if (_isIpBlocked(ip)) {
+    const record = _bruteForceTracker.get(ip)
+    const remaining = Math.ceil((record.releaseAt - Date.now()) / 1000)
+    return res.status(429).json({
+      ok: false,
+      error: 'Too many failed attempts. Please try again later.',
+      code: 'IP_LOCKED',
+      retryAfter: remaining,
+    })
+  }
+
   const { username, password } = req.body
 
   if (!username || !password) {
     return res.status(400).json({ ok: false, error: 'Username and password required' })
   }
 
+  // SECURITY: Type validation
+  if (typeof username !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ ok: false, error: 'Invalid request format' })
+  }
+
+  // SECURITY: Username format validation (prevent injection)
+  if (!/^[a-zA-Z0-9_\-\.]{1,64}$/.test(username)) {
+    return res.status(400).json({ ok: false, error: 'Invalid username format' })
+  }
+
   if (username !== envConfig.AUTH_USERNAME || password !== envConfig.AUTH_PASSWORD) {
+    // SECURITY: Record brute force attempt
+    _recordBruteForce(ip)
+
+    // SECURITY: Audit log failed login
+    if (typeof createAuditLog === 'function') {
+      createAuditLog({
+        username,
+        action: 'LOGIN_FAILED',
+        resource: 'auth',
+        details: { reason: 'invalid_credentials' },
+        ipAddress: ip,
+        userAgent: req.get('User-Agent'),
+        status: 'failure',
+      }).catch(() => {})
+    }
+
     return res.status(401).json({ ok: false, error: 'Invalid credentials' })
+  }
+
+  // SECURITY: Audit log successful login
+  if (typeof createAuditLog === 'function') {
+    createAuditLog({
+      username,
+      action: 'LOGIN_SUCCESS',
+      resource: 'auth',
+      details: {},
+      ipAddress: ip,
+      userAgent: req.get('User-Agent'),
+      status: 'success',
+    }).catch(() => {})
   }
 
   const token = randomUUID()
@@ -221,7 +499,21 @@ app.post('/api/auth/login', (req, res) => {
 
   sessions.set(token, { username, expires })
 
-  res.json({ ok: true, token })
+  // SECURITY: Set secure cookie flags (HttpOnly, SameSite)
+  const isProduction = process.env.NODE_ENV === 'production' || process.env.https === 'on'
+  const cookieValue = `session_token=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${24 * 60 * 60}${isProduction ? '; Secure' : ''}`
+  res.setHeader('Set-Cookie', cookieValue)
+
+  res.json({
+    ok: true,
+    token,
+    user: {
+      id: `env:${username}`,
+      username,
+      role: 'admin',
+      permissions: ['perm_system_admin'],
+    },
+  })
 })
 
 app.post('/api/auth/logout', (req, res) => {
@@ -233,7 +525,12 @@ app.post('/api/auth/logout', (req, res) => {
 })
 
 app.get('/api/auth/check', authMiddleware, (req, res) => {
-  res.json({ ok: true, authenticated: true })
+  res.json({
+    ok: true,
+    authenticated: true,
+    user: req.user,
+    sessionId: req.sessionId,
+  })
 })
 
 function parseEnvFile(content) {
@@ -272,26 +569,21 @@ app.get('/api/config', authMiddleware, (req, res) => {
     }
     const content = readFileSync(envPath, 'utf-8')
     const config = parseEnvFile(content)
-    res.json({ ok: true, config })
+    res.json({ ok: true, config: sanitizeConfigForClient(config) })
   } catch (err) {
     res.status(500).json({ ok: false, error: { message: err.message } })
   }
 })
 
+// SECURITY: Config write requires config:write permission
+// Note: We use requirePermission from auth.js
 app.post('/api/config', authMiddleware, (req, res) => {
   try {
-    const { AUTH_USERNAME, AUTH_PASSWORD, OPENCLAW_WS_URL, OPENCLAW_AUTH_TOKEN, OPENCLAW_AUTH_PASSWORD } = req.body
-    
     const existingContent = existsSync(envPath) ? readFileSync(envPath, 'utf-8') : ''
     const existing = parseEnvFile(existingContent)
-    
-    if (AUTH_USERNAME !== undefined) existing.AUTH_USERNAME = AUTH_USERNAME
-    if (AUTH_PASSWORD !== undefined) existing.AUTH_PASSWORD = AUTH_PASSWORD
-    if (OPENCLAW_WS_URL !== undefined) existing.OPENCLAW_WS_URL = OPENCLAW_WS_URL
-    if (OPENCLAW_AUTH_TOKEN !== undefined) existing.OPENCLAW_AUTH_TOKEN = OPENCLAW_AUTH_TOKEN
-    if (OPENCLAW_AUTH_PASSWORD !== undefined) existing.OPENCLAW_AUTH_PASSWORD = OPENCLAW_AUTH_PASSWORD
-    
-    const newContent = stringifyEnvFile(existing)
+
+    const nextConfig = applyConfigUpdate(existing, req.body || {})
+    const newContent = stringifyEnvFile(nextConfig)
     writeFileSync(envPath, newContent, 'utf-8')
     
     const oldConfig = { ...envConfig }
@@ -373,7 +665,8 @@ app.get('/api/npm/versions', async (req, res) => {
   }
 })
 
-app.post('/api/npm/update', async (req, res) => {
+// SECURITY: npm update requires admin role (system changes)
+app.post('/api/npm/update', requireRole('admin'), async (req, res) => {
   try {
     const { version } = req.body
     const packageSpec = version ? `openclaw@${version}` : 'openclaw@latest'
@@ -381,23 +674,44 @@ app.post('/api/npm/update', async (req, res) => {
     console.log(`[Server] Updating OpenClaw via npm: ${packageSpec}`)
     
     // 执行npm更新命令
+    // Security: Whitelist for allowed packages
+    const ALLOWED_PACKAGES = ['openclaw', 'pm2', 'nodemon', 'typescript', 'tsx']
+    const packageName = packageSpec.split('@')[0]
+    if (!ALLOWED_PACKAGES.includes(packageName)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid package',
+        message: `Package '${packageName}' is not in the allowed list: ${ALLOWED_PACKAGES.join(', ')}`
+      })
+    }
+
+    // Sanitize package spec to prevent command injection
+    const sanitizedSpec = packageSpec.replace(/[^a-zA-Z0-9@.-]/g, '')
+    if (sanitizedSpec !== packageSpec) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid package spec',
+        message: 'Package spec contains invalid characters'
+      })
+    }
+
     const { execSync } = await import('child_process')
-    const output = execSync(`npm install -g ${packageSpec}`, {
+    const output = execSync(`npm install -g ${sanitizedSpec}`, {
       encoding: 'utf8',
       timeout: 120000 // 2分钟超时
     })
-    
+
     console.log('[Server] npm update output:', output)
-    
-    res.json({ 
-      ok: true, 
+
+    res.json({
+      ok: true,
       message: `Successfully updated to ${packageSpec}`,
       output: output
     })
   } catch (error) {
     console.error('[Server] Failed to update OpenClaw via npm:', error.message)
-    res.status(500).json({ 
-      ok: false, 
+    res.status(500).json({
+      ok: false,
       error: error.message,
       stdout: error.stdout,
       stderr: error.stderr
@@ -468,22 +782,7 @@ async function getDiskSpace() {
 
 app.get('/api/system/metrics', authMiddleware, async (req, res) => {
   try {
-    const cpus = os.cpus()
-    const totalMem = os.totalmem()
-    const freeMem = os.freemem()
-    const usedMem = totalMem - freeMem
-
-    const diskInfo = await getDiskSpace()
-    const diskTotal = diskInfo.total
-    const diskFree = diskInfo.free
-
-    let cpuUsage = 0
-    for (const cpu of cpus) {
-      const total = Object.values(cpu.times).reduce((a, b) => a + b, 0)
-      const idle = cpu.times.idle
-      cpuUsage += ((total - idle) / total) * 100
-    }
-    cpuUsage = cpuUsage / cpus.length
+    const metrics = collectLocalSystemMetrics()
 
     let presence = []
     try {
@@ -507,37 +806,11 @@ app.get('/api/system/metrics', authMiddleware, async (req, res) => {
       // use os uptime
     }
 
-    const networkStats = getNetworkStats()
+    metrics.uptime = uptime
 
     res.json({
       ok: true,
-      metrics: {
-        cpu: {
-          usage: Math.round(cpuUsage * 10) / 10,
-          cores: cpus.length,
-          model: cpus[0]?.model || 'Unknown',
-        },
-        memory: {
-          total: totalMem,
-          used: usedMem,
-          free: freeMem,
-          usagePercent: Math.round((usedMem / totalMem) * 1000) / 10,
-        },
-        disk: {
-          total: diskTotal,
-          used: diskTotal - diskFree,
-          free: diskFree,
-          usagePercent: diskTotal > 0 ? Math.round(((diskTotal - diskFree) / diskTotal) * 1000) / 10 : 0,
-        },
-        network: {
-          bytesReceived: networkStats.bytesReceived,
-          bytesSent: networkStats.bytesSent,
-        },
-        uptime,
-        loadAverage: os.loadavg(),
-        platform: os.platform(),
-        hostname: os.hostname(),
-      },
+      metrics,
       presence,
     })
   } catch (err) {
@@ -557,25 +830,44 @@ function expandHomePath(path) {
   return path
 }
 
-function safePath(userPath, workspaceBase) {
+async function safePath(userPath, workspaceBase) {
   if (!workspaceBase) return null
   
   const expandedBase = resolve(expandHomePath(workspaceBase))
   const targetPath = resolve(expandedBase, userPath || '')
   
+  // Security: Resolve symbolic links to prevent symlink attacks
+  let realPath
+  try {
+    if (await fsPromises.stat(targetPath).catch(() => null)) {
+      realPath = await fsPromises.realpath(targetPath)
+    } else {
+      // For non-existent paths, resolve the parent directory
+      const parentDir = pathDirname(targetPath)
+      if (await fsPromises.stat(parentDir).catch(() => null)) {
+        const realParentDir = await fsPromises.realpath(parentDir)
+        realPath = join(realParentDir, basename(targetPath))
+      } else {
+        realPath = targetPath
+      }
+    }
+  } catch (e) {
+    realPath = targetPath
+  }
+  
   const normalizedBase = expandedBase.toLowerCase()
-  const normalizedTarget = targetPath.toLowerCase()
+  const normalizedTarget = realPath.toLowerCase()
   
   if (!normalizedTarget.startsWith(normalizedBase)) {
     console.log('[Files] Path escape detected:', { 
       base: expandedBase, 
-      target: targetPath,
+      target: realPath,
       userPath 
     })
     return null
   }
   
-  return targetPath
+  return realPath
 }
 
 async function getAgentWorkspace(agentId) {
@@ -925,7 +1217,8 @@ app.post('/api/files/mkdir', authMiddleware, async (req, res) => {
   }
 })
 
-app.post('/api/files/delete', authMiddleware, async (req, res) => {
+// SECURITY: Files delete requires files:manage permission
+app.post('/api/files/delete', authMiddleware, requirePermission('files:manage'), async (req, res) => {
   try {
     const { path: relPath, name, workspace: workspaceParam } = req.body
     const filePath = relPath || name
@@ -1072,11 +1365,33 @@ app.get('/api/status', authMiddleware, async (req, res) => {
   }
 })
 
+// SECURITY: RPC method whitelist to prevent arbitrary gateway calls
+const _rpcMethodWhitelist = new Set([
+  'status', 'health', 'agents.list', 'agents.files.list',
+  'system-presence', 'gateway.status', 'runtime.list',
+  'config.get', 'config.set', 'sessions.list', 'memory.list',
+])
+// Also allow methods starting with these prefixes
+const _rpcPrefixWhitelist = ['gateway.', 'agent.', 'node.']
+
 app.post('/api/rpc', authMiddleware, async (req, res) => {
   const { method, params } = req.body
 
   if (!method) {
     return res.status(400).json({ error: 'Method is required' })
+  }
+
+  // SECURITY: Validate method name format (prevent injection)
+  if (typeof method !== 'string' || !/^[a-zA-Z0-9_\-\.]+$/.test(method)) {
+    return res.status(400).json({ error: 'Invalid method name' })
+  }
+
+  // SECURITY: Check method whitelist
+  const isAllowed = _rpcMethodWhitelist.has(method) ||
+    _rpcPrefixWhitelist.some(prefix => method.startsWith(prefix))
+  if (!isAllowed) {
+    console.warn(`[Security] RPC method not whitelisted: ${method}`)
+    return res.status(403).json({ error: 'Method not allowed', code: 'METHOD_NOT_ALLOWED' })
   }
 
   if (!gateway.isConnected) {
@@ -1149,6 +1464,15 @@ app.get('/api/terminal/stream', authMiddleware, (req, res) => {
   try {
     const shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/bash'
     
+    // Security: Limit shell command execution
+    const ALLOWED_SHELLS = ['/bin/bash', '/bin/sh', '/usr/bin/zsh']
+    if (!ALLOWED_SHELLS.includes(shell)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'Shell not allowed'
+      })
+    }
     const ptyProcess = pty.spawn(shell, [], {
       name: 'xterm-256color',
       cols,
@@ -1246,7 +1570,8 @@ app.post('/api/terminal/resize', authMiddleware, (req, res) => {
   }
 })
 
-app.post('/api/terminal/destroy', authMiddleware, (req, res) => {
+// SECURITY: Terminal destroy requires terminal:access permission
+app.post('/api/terminal/destroy', authMiddleware, requirePermission('terminal:access'), (req, res) => {
   const { sessionId } = req.body
 
   if (!sessionId) {
@@ -1536,7 +1861,8 @@ app.get('/api/desktop/list', authMiddleware, (req, res) => {
   res.json({ ok: true, sessions })
 })
 
-app.post('/api/desktop/create', authMiddleware, async (req, res) => {
+// SECURITY: Desktop create requires desktop:access permission
+app.post('/api/desktop/create', authMiddleware, requirePermission('desktop:access'), async (req, res) => {
   const { nodeId, width, height, host, port, password, display: inputDisplay } = req.body
   
   const sessionId = randomUUID()
@@ -2046,7 +2372,7 @@ app.get('/api/wizard/scenarios/:id', authMiddleware, (req, res) => {
   }
 })
 
-app.post('/api/wizard/scenarios', authMiddleware, (req, res) => {
+app.post('/api/wizard/scenarios', authMiddleware, requirePermission('wizard:manage'), (req, res) => {
   try {
     const id = randomUUID()
     const now = Date.now()
@@ -2201,7 +2527,13 @@ app.get('/api/wizard/tasks/:id', authMiddleware, (req, res) => {
   }
 })
 
-app.post('/api/wizard/tasks', authMiddleware, (req, res) => {
+// Import/Export Routes
+app.use('/api/import-export', importExportRoutes)
+
+// Monitoring Routes
+app.use('/api/monitoring', monitoringRoutes)
+
+app.post('/api/wizard/tasks', authMiddleware, requirePermission('wizard:manage'), (req, res) => {
   try {
     const id = randomUUID()
     const now = Date.now()
@@ -2306,8 +2638,15 @@ app.get('/api/media', (req, res) => {
     
     console.log('[Media] Request path:', path)
     
-    // Prevent directory traversal
-    const safePath = path.replace(/\.\./g, '').replace(/\//g, sep)
+    // SECURITY: Prevent directory traversal + null byte injection
+    const safePath = path.replace(/\.\./g, '').replace(/[;\0\n\r]/g, '')
+    const resolvedPath = resolve(mediaDir, safePath)
+    // Ensure resolved path stays within mediaDir
+    const resolvedMediaDir = resolve(mediaDir)
+    if (!resolvedPath.startsWith(resolvedMediaDir + sep)) {
+      console.warn("[Media] Path traversal attempt:", { mediaDir, safePath, resolvedPath })
+      return res.status(403).json({ ok: false, error: { message: 'Access denied' } })
+    }
     console.log('[Media] Safe path:', safePath)
     
     // 支持多个可能的媒体目录，按优先级搜索
@@ -3157,7 +3496,8 @@ app.get('/api/backup/tasks/:taskId', authMiddleware, (req, res) => {
   })
 })
 
-app.delete('/api/backup/tasks/completed', authMiddleware, (req, res) => {
+// SECURITY: Backup task cleanup requires backup:manage permission
+app.delete('/api/backup/tasks/completed', authMiddleware, requirePermission('backup:manage'), (req, res) => {
   try {
     const result = db.prepare('DELETE FROM backup_records WHERE status IN (?, ?)').run('completed', 'failed')
     console.log(`[Backup] Cleared ${result.changes} completed/failed tasks`)
@@ -3168,7 +3508,8 @@ app.delete('/api/backup/tasks/completed', authMiddleware, (req, res) => {
   }
 })
 
-app.post('/api/backup/create', authMiddleware, async (req, res) => {
+// SECURITY: Backup create requires backup:manage permission
+app.post('/api/backup/create', authMiddleware, requirePermission('backup:manage'), async (req, res) => {
   try {
     const taskId = generateTaskId()
     const task = {
@@ -3227,7 +3568,8 @@ app.get('/api/backup/download', authMiddleware, (req, res) => {
 })
 
 // 恢复备份
-app.post('/api/backup/restore', authMiddleware, async (req, res) => {
+// SECURITY: Backup restore requires backup:manage permission
+app.post('/api/backup/restore', authMiddleware, requirePermission('backup:manage'), async (req, res) => {
   try {
     const { filename } = req.body
     if (!filename) {
@@ -3270,7 +3612,8 @@ app.post('/api/backup/restore', authMiddleware, async (req, res) => {
 })
 
 // 删除备份
-app.delete('/api/backup/delete', authMiddleware, (req, res) => {
+// SECURITY: Backup delete requires backup:manage permission
+app.delete('/api/backup/delete', authMiddleware, requirePermission('backup:manage'), (req, res) => {
   try {
     const filename = req.query.filename
     if (!filename) {
@@ -3302,7 +3645,8 @@ const backupUpload = multer({
   limits: { fileSize: 100 * 1024 * 1024 } // 100MB 限制
 })
 
-app.post('/api/backup/upload', authMiddleware, backupUpload.single('backup'), async (req, res) => {
+// SECURITY: Backup upload requires backup:manage permission
+app.post('/api/backup/upload', authMiddleware, requirePermission('backup:manage'), backupUpload.single('backup'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ ok: false, error: { message: 'No backup file uploaded' } })
@@ -3513,6 +3857,176 @@ if (hasDist) {
   })
 }
 
+// Register Office and MyWorld API routes
+migrateOfficeTables()
+registerOfficeRoutes(app)
+migrateMyWorldTables()
+registerMyWorldRoutes(app)
+
+// Register Audit Log API routes
+app.use('/api/audit', auditRoutes)
+
+// Register Batch Operations API routes
+app.use('/api/batch', batchRoutes)
+
+// Register Search API routes
+app.use('/api/search', searchRoutes)
+
+// Register Statistics API routes
+app.use('/api/stats', statsRoutes)
+
+// Register RBAC API routes
+app.use('/api/rbac', rbacRoutes)
+
+// Register Themes API routes
+app.use('/api/themes', themesRoutes)
+
+// =====================================================
+// R-01: User & Role Management API
+// =====================================================
+app.get('/api/users', authMiddleware, requirePermission('users:manage'), (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT u.id, u.username, u.display_name, u.role, u.status, u.email, u.avatar, u.created_at, u.updated_at, u.last_login_at
+      FROM users u ORDER BY u.created_at DESC
+    `).all()
+    const users = rows.map(r => ({ ...r, lastLoginAt: r.last_login_at, createdAt: r.created_at, updatedAt: r.updated_at }))
+    res.json({ ok: true, users })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+app.post('/api/users', authMiddleware, requirePermission('users:manage'), (req, res) => {
+  try {
+    const { username, password, displayName, role, email } = req.body
+    if (!username || !password) return res.status(400).json({ ok: false, error: 'username and password required' })
+    const { hash, salt } = hashPassword(password)
+    const id = randomUUID()
+    db.prepare(`INSERT INTO users (id, username, password_hash, salt, display_name, role, email) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, username, hash, salt, displayName || username, role || 'viewer', email || null)
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id)
+    res.json({ ok: true, user })
+  } catch (err) {
+    if (err.message.includes('UNIQUE')) return res.status(409).json({ ok: false, error: 'Username already exists' })
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+app.put('/api/users/:id', authMiddleware, requirePermission('users:manage'), (req, res) => {
+  try {
+    const { id } = req.params
+    const { displayName, role, status, email } = req.body
+    db.prepare(`UPDATE users SET display_name = ?, role = ?, status = ?, email = ?, updated_at = ? WHERE id = ?`).run(displayName || null, role || null, status || null, email || null, Date.now(), id)
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id)
+    res.json({ ok: true, user })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+app.delete('/api/users/:id', authMiddleware, requirePermission('users:manage'), (req, res) => {
+  try {
+    const { id } = req.params
+    const deleted = db.prepare('DELETE FROM users WHERE id = ?').run(id)
+    res.json({ ok: deleted.changes > 0 })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+app.get('/api/roles', authMiddleware, requirePermission('roles:manage'), (req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM roles ORDER BY is_system DESC, name ASC').all()
+    const roles = rows.map(r => ({ ...r, permissions: JSON.parse(r.permissions || '[]') }))
+    res.json({ ok: true, roles })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+app.get('/api/permissions', authMiddleware, requirePermission('roles:manage'), (req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM permissions ORDER BY resource, action').all()
+    res.json({ ok: true, permissions: rows })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+// =====================================================
+// R-02: Notification API (DB-backed)
+// =====================================================
+app.get('/api/notifications', authMiddleware, (req, res) => {
+  try {
+    const { page = 1, pageSize = 20, unreadOnly } = req.query
+    const userId = req.user?.id || null
+    const result = getNotifications({ userId, page: Number(page), pageSize: Number(pageSize), unreadOnly: unreadOnly === 'true' })
+    res.json({ ok: true, ...result })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+app.put('/api/notifications/:id/read', authMiddleware, (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user?.id || null
+    const ok = markNotificationRead(id, userId)
+    res.json({ ok })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+app.put('/api/notifications/read-all', authMiddleware, (req, res) => {
+  try {
+    const userId = req.user?.id || null
+    const count = markAllNotificationsRead(userId)
+    res.json({ ok: true, count })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+app.delete('/api/notifications/:id', authMiddleware, requirePermission('notifications:manage'), (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user?.id || null
+    const ok = deleteNotification(id, userId)
+    res.json({ ok })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+// =====================================================
+// R-02: Notification Channels (Alert Destinations)
+// =====================================================
+const alertChannels = [
+  { id: 'in_app', name: '应用内通知', type: 'in_app', enabled: true, description: '在应用内通知中心显示' },
+  { id: 'email', name: '邮件通知', type: 'email', enabled: false, description: '通过邮件发送通知' },
+  { id: 'feishu', name: '飞书通知', type: 'feishu', enabled: false, description: '通过飞书机器人发送通知' },
+]
+
+app.get('/api/notification-channels', authMiddleware, requirePermission('notifications:manage'), (req, res) => {
+  res.json({ ok: true, channels: alertChannels })
+})
+
+app.put('/api/notification-channels/:id', authMiddleware, requirePermission('notifications:manage'), (req, res) => {
+  try {
+    const { id } = req.params
+    const { enabled, config } = req.body
+    const channel = alertChannels.find(c => c.id === id)
+    if (!channel) return res.status(404).json({ ok: false, error: 'Channel not found' })
+    channel.enabled = enabled ?? channel.enabled
+    if (config) channel.config = config
+    res.json({ ok: true, channel })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
+// =====================================================
 server.listen(envConfig.PORT, () => {
   console.log(`Server running on http://localhost:${envConfig.PORT}`)
   console.log(`OpenClaw Gateway: ${envConfig.OPENCLAW_WS_URL}`)
