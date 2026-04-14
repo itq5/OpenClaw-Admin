@@ -9,6 +9,7 @@ import {
   NForm,
   NFormItem,
   NInput,
+  NCheckbox,
   NButton,
   NSpin,
   useMessage,
@@ -18,6 +19,13 @@ import { useThemeStore, type ThemeMode } from '@/stores/theme'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useAuthStore } from '@/stores/auth'
 import { ConnectionState } from '@/api/types'
+import {
+  applyLoadedConfig,
+  buildConfigPayload,
+  createEmptyConfigForm,
+  createEmptySecretClearForm,
+  createEmptySecretState,
+} from './config-form'
 
 const themeStore = useThemeStore()
 const wsStore = useWebSocketStore()
@@ -29,13 +37,9 @@ const appVersion = import.meta.env.VITE_APP_VERSION || ''
 
 const loading = ref(false)
 const saving = ref(false)
-const configForm = ref({
-  AUTH_USERNAME: '',
-  AUTH_PASSWORD: '',
-  OPENCLAW_WS_URL: '',
-  OPENCLAW_AUTH_TOKEN: '',
-  OPENCLAW_AUTH_PASSWORD: '', // Gateway 密码认证
-})
+const configForm = ref(createEmptyConfigForm())
+const secretState = ref(createEmptySecretState())
+const secretClearForm = ref(createEmptySecretClearForm())
 
 const themeOptions = computed(() => ([
   { label: t('pages.settings.themeLight'), value: 'light' },
@@ -52,6 +56,30 @@ const connectionStatus = computed(() => {
   }
 })
 
+const secretConfiguredPlaceholder = computed(() => t('pages.settings.secretConfiguredPlaceholder'))
+const secretWillBeClearedPlaceholder = computed(() => t('pages.settings.secretWillBeClearedPlaceholder'))
+const authPasswordPlaceholder = computed(() => (
+  secretClearForm.value.AUTH_PASSWORD_CLEAR
+    ? secretWillBeClearedPlaceholder.value
+    : secretState.value.AUTH_PASSWORD_SET
+    ? secretConfiguredPlaceholder.value
+    : t('pages.settings.authPasswordPlaceholder')
+))
+const openClawTokenPlaceholder = computed(() => (
+  secretClearForm.value.OPENCLAW_AUTH_TOKEN_CLEAR
+    ? secretWillBeClearedPlaceholder.value
+    : secretState.value.OPENCLAW_AUTH_TOKEN_SET
+    ? secretConfiguredPlaceholder.value
+    : t('pages.settings.openclawTokenPlaceholder')
+))
+const openClawPasswordPlaceholder = computed(() => (
+  secretClearForm.value.OPENCLAW_AUTH_PASSWORD_CLEAR
+    ? secretWillBeClearedPlaceholder.value
+    : secretState.value.OPENCLAW_AUTH_PASSWORD_SET
+    ? secretConfiguredPlaceholder.value
+    : t('pages.settings.openclawPasswordPlaceholder')
+))
+
 function handleThemeChange(mode: ThemeMode) {
   themeStore.setMode(mode)
 }
@@ -67,13 +95,10 @@ async function loadConfig() {
     })
     const data = await response.json()
     if (data.ok) {
-      configForm.value = {
-        AUTH_USERNAME: data.config.AUTH_USERNAME || '',
-        AUTH_PASSWORD: data.config.AUTH_PASSWORD || '',
-        OPENCLAW_WS_URL: data.config.OPENCLAW_WS_URL || '',
-        OPENCLAW_AUTH_TOKEN: data.config.OPENCLAW_AUTH_TOKEN || '',
-        OPENCLAW_AUTH_PASSWORD: data.config.OPENCLAW_AUTH_PASSWORD || '',
-      }
+      const loadedConfig = applyLoadedConfig(data.config)
+      configForm.value = loadedConfig.form
+      secretState.value = loadedConfig.secretState
+      secretClearForm.value = loadedConfig.clearForm
     }
   } catch (e) {
     message.error(t('pages.settings.loadFailed'))
@@ -92,7 +117,7 @@ async function saveConfig() {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(configForm.value),
+      body: JSON.stringify(buildConfigPayload(configForm.value, secretClearForm.value)),
     })
     const data = await response.json()
     if (data.ok) {
@@ -138,9 +163,17 @@ onMounted(() => {
             <NInput
               v-model:value="configForm.AUTH_PASSWORD"
               type="password"
+              :disabled="secretClearForm.AUTH_PASSWORD_CLEAR"
               show-password-on="click"
-              :placeholder="t('pages.settings.authPasswordPlaceholder')"
+              :placeholder="authPasswordPlaceholder"
             />
+            <NCheckbox
+              v-if="secretState.AUTH_PASSWORD_SET"
+              v-model:checked="secretClearForm.AUTH_PASSWORD_CLEAR"
+              style="margin-top: 8px;"
+            >
+              {{ t('pages.settings.clearSavedSecret') }}
+            </NCheckbox>
           </NFormItem>
           
           <NFormItem :label="t('pages.settings.openclawUrl')">
@@ -154,18 +187,34 @@ onMounted(() => {
             <NInput
               v-model:value="configForm.OPENCLAW_AUTH_TOKEN"
               type="password"
+              :disabled="secretClearForm.OPENCLAW_AUTH_TOKEN_CLEAR"
               show-password-on="click"
-              :placeholder="t('pages.settings.openclawTokenPlaceholder')"
+              :placeholder="openClawTokenPlaceholder"
             />
+            <NCheckbox
+              v-if="secretState.OPENCLAW_AUTH_TOKEN_SET"
+              v-model:checked="secretClearForm.OPENCLAW_AUTH_TOKEN_CLEAR"
+              style="margin-top: 8px;"
+            >
+              {{ t('pages.settings.clearSavedSecret') }}
+            </NCheckbox>
           </NFormItem>
           
           <NFormItem :label="t('pages.settings.openclawPassword')">
             <NInput
               v-model:value="configForm.OPENCLAW_AUTH_PASSWORD"
               type="password"
+              :disabled="secretClearForm.OPENCLAW_AUTH_PASSWORD_CLEAR"
               show-password-on="click"
-              :placeholder="t('pages.settings.openclawPasswordPlaceholder')"
+              :placeholder="openClawPasswordPlaceholder"
             />
+            <NCheckbox
+              v-if="secretState.OPENCLAW_AUTH_PASSWORD_SET"
+              v-model:checked="secretClearForm.OPENCLAW_AUTH_PASSWORD_CLEAR"
+              style="margin-top: 8px;"
+            >
+              {{ t('pages.settings.clearSavedSecret') }}
+            </NCheckbox>
           </NFormItem>
           
           <NFormItem :label="''">

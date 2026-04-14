@@ -100,12 +100,12 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
   function connect(url?: string) {
     lastError.value = null
-    
-    const authStore = useAuthStore()
+
+    ws.value.dispose()
     ws.value = createWebSocket()
     rpc.value = new RPCClient(ws.value)
     listenersBound = false
-    
+
     bindListeners()
     rebindPersistentListeners()
     ws.value.connect(url)

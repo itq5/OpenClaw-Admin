@@ -2,7 +2,10 @@ node_modules
 dist
 .vscode
 backups
+output
+.playwright-cli
 .env
 !.env.example
 data/wizard.db-shm
 data/wizard.db-wal
+src/i18n/generated

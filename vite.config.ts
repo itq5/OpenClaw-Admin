@@ -1,4 +1,5 @@
 import { readFileSync } from 'fs'
+import VueI18nPlugin from '@intlify/unplugin-vue-i18n/vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 import { defineConfig, loadEnv } from 'vite'
@@ -15,7 +16,13 @@ export default defineConfig(({ mode }) => {
   const frontendPort = env.DEV_PORT || '3001'
   
   return {
-    plugins: [vue()],
+    plugins: [
+      vue(),
+      VueI18nPlugin({
+        include: resolve(__dirname, './src/i18n/generated/**'),
+        strictMessage: false,
+      }),
+    ],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),
@@ -44,6 +51,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     define: {
+      __INTLIFY_JIT_COMPILATION__: true,
+      __INTLIFY_DROP_MESSAGE_COMPILER__: false,
       'import.meta.env.VITE_APP_TITLE': JSON.stringify(env.VITE_APP_TITLE || 'OpenClaw Web'),
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
     },
