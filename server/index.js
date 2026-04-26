@@ -1471,6 +1471,12 @@ function findHermesHome(hermesCliPath) {
     return envConfig.HERMES_HOME
   }
 
+  const homeDir = os.homedir()
+  const hermesDataDir = join(homeDir, '.hermes')
+  if (existsSync(hermesDataDir)) {
+    return homeDir
+  }
+
   if (hermesCliPath) {
     const venvBin = dirname(hermesCliPath)
     const venvDir = dirname(venvBin)
@@ -1480,10 +1486,8 @@ function findHermesHome(hermesCliPath) {
     }
   }
 
-  const homeDir = os.homedir()
   const possibleHomes = [
     join(homeDir, 'hermes-agent'),
-    join(homeDir, '.hermes'),
     '/data/user/work/hermes-agent'
   ]
 
@@ -1493,12 +1497,16 @@ function findHermesHome(hermesCliPath) {
     }
   }
 
-  return hermesCliPath ? dirname(dirname(dirname(hermesCliPath))) : null
+  return homeDir
 }
 
 const HERMES_CLI_PATH = findHermesCliPath()
 const HERMES_HOME = findHermesHome(HERMES_CLI_PATH)
 const HERMES_VENV_BIN = HERMES_CLI_PATH ? dirname(HERMES_CLI_PATH) : null
+
+console.log('[HermesCLI] HERMES_CLI_PATH:', HERMES_CLI_PATH)
+console.log('[HermesCLI] HERMES_HOME:', HERMES_HOME)
+console.log('[HermesCLI] HERMES_VENV_BIN:', HERMES_VENV_BIN)
 
 // GET /api/hermes-cli/sessions — List all sessions
 app.get('/api/hermes-cli/sessions', authMiddleware, (req, res) => {
@@ -1654,8 +1662,13 @@ app.get('/api/hermes-cli/stream', authMiddleware, (req, res) => {
       ...process.env,
       TERM: 'xterm-256color',
       HERMES_HOME: HERMES_HOME,
+      HOME: os.homedir(),
       PATH: `${HERMES_VENV_BIN}:${process.env.PATH || ''}`,
     }
+
+    console.log('[HermesCLI] Spawning:', HERMES_CLI_PATH, cliArgs)
+    console.log('[HermesCLI] CWD:', HERMES_HOME)
+    console.log('[HermesCLI] ENV HOME:', hermesEnv.HOME, 'HERMES_HOME:', hermesEnv.HERMES_HOME)
 
     const ptyProcess = pty.spawn(HERMES_CLI_PATH, cliArgs, {
       name: 'xterm-256color',
