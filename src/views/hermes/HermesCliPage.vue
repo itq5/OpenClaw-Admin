@@ -94,7 +94,11 @@ const modelOptions = computed(() => {
 
 
 function buildCliArgs(): string[] {
-  const args: string[] = ['chat']
+  if (launchConfig.value.resumeSession) {
+    return ['--tui', '-r', launchConfig.value.resumeSession]
+  }
+  
+  const args: string[] = ['chat', '--tui']
   if (launchConfig.value.model && launchConfig.value.model !== 'auto') {
     args.push('--model', launchConfig.value.model)
   }
@@ -103,9 +107,6 @@ function buildCliArgs(): string[] {
   }
   if (launchConfig.value.toolsets) {
     args.push('-t', launchConfig.value.toolsets)
-  }
-  if (launchConfig.value.resumeSession) {
-    args.push('-r', launchConfig.value.resumeSession)
   }
   if (launchConfig.value.yolo) {
     args.push('--yolo')
@@ -131,7 +132,7 @@ function buildCliArgs(): string[] {
 const editingSessionId = ref<string | null>(null)
 const editingSessionName = ref('')
 
-const hermesSessions = ref<Array<{ id: string; title?: string; createdAt?: string }>>([])
+const hermesSessions = ref<Array<{ id: string; title?: string; model?: string; preview?: string; started_at?: number; last_active?: number }>>([])
 const hermesSessionsLoading = ref(false)
 const hermesConnectionStore = useHermesConnectionStore()
 
@@ -159,11 +160,53 @@ async function fetchHermesSessions() {
   }
 }
 
+function formatSessionTime(timestamp?: number): string {
+  if (!timestamp) return ''
+  const date = new Date(timestamp * 1000)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  
+  if (diffDays === 0) {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  } else if (diffDays === 1) {
+    return '昨天'
+  } else if (diffDays < 7) {
+    return `${diffDays}天前`
+  } else {
+    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  }
+}
+
 const hermesSessionOptions = computed(() => {
-  return hermesSessions.value.map(s => ({
-    label: s.title || s.id.slice(0, 8),
-    value: s.id,
-  }))
+  return hermesSessions.value.map(s => {
+    const parts: string[] = []
+    
+    if (s.title) {
+      parts.push(s.title)
+    } else if (s.preview) {
+      parts.push(s.preview.slice(0, 30) + (s.preview.length > 30 ? '...' : ''))
+    } else {
+      parts.push(s.id.slice(0, 8))
+    }
+    
+    const meta: string[] = []
+    if (s.model) {
+      meta.push(s.model)
+    }
+    const timeStr = formatSessionTime(s.last_active || s.started_at)
+    if (timeStr) {
+      meta.push(timeStr)
+    }
+    if (meta.length > 0) {
+      parts.push(`(${meta.join(' · ')})`)
+    }
+    
+    return {
+      label: parts.join(' '),
+      value: s.id,
+    }
+  })
 })
 
 const connectedSessions = computed(() =>

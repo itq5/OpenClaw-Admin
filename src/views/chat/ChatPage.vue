@@ -23,7 +23,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
-import { CopyOutline, RefreshOutline, SendOutline, StopCircleOutline, ChevronBackOutline, ChevronForwardOutline } from '@vicons/ionicons5'
+import { CopyOutline, RefreshOutline, SendOutline, StopCircleOutline, ChevronBackOutline, ChevronForwardOutline, VolumeHighOutline, StopOutline } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
@@ -33,6 +33,8 @@ import { useSkillStore } from '@/stores/skill'
 import { useWebSocketStore } from '@/stores/websocket'
 import { formatDate, formatRelativeTime, parseSessionKey, truncate } from '@/utils/format'
 import { renderSimpleMarkdown } from '@/utils/markdown'
+import { useEdgeTTS } from '@/composables/useEdgeTTS'
+import { useTTSSettings } from '@/composables/useTTSSettings'
 import type { AgentInstance, ChatMessage, ChatMessageContent, SessionsUsageSession, Skill } from '@/api/types'
 
 const message = useMessage()
@@ -89,6 +91,14 @@ const quickReplies = ref<Array<{
 const expandedToolCalls = ref(new Set<string>())
 const expandedToolResults = ref(new Set<string>())
 
+// TTS state
+const playingMessageId = ref<string | null>(null)
+const { speak: ttsSpeak, stop: ttsStop, isPlaying: ttsIsPlaying, isLoading: ttsIsLoading } = useEdgeTTS({
+  voice: 'zh-CN',
+})
+const { settings: ttsSettings } = useTTSSettings()
+const lastPlayedMessageId = ref<string | null>(null)
+
 function toggleToolCallExpand(key: string) {
   const set = expandedToolCalls.value
   if (set.has(key)) {
@@ -132,6 +142,44 @@ async function copyToClipboard(text: string) {
     message.success(t('common.copied'))
   } catch {
     message.error(t('common.copyFailed'))
+  }
+}
+
+// ---- Text-to-Speech ----
+
+function stopTTS() {
+  ttsStop()
+  playingMessageId.value = null
+}
+
+async function playTTS(msg: ChatMessage) {
+  const content = msg.content || ''
+  if (!content.trim()) return
+
+  // If already playing this message, stop it
+  if (playingMessageId.value === msg.id) {
+    stopTTS()
+    return
+  }
+
+  // Stop any current playback
+  stopTTS()
+
+  try {
+    playingMessageId.value = msg.id || null
+
+    // Use TTS settings from local storage
+    const voice = ttsSettings.value.voice || 'zh-CN'
+    const rate = ttsSettings.value.rate ?? 1.0
+    const volume = ttsSettings.value.volume ?? 1.0
+    const pitch = ttsSettings.value.pitch ?? 1.0
+
+    // Use Web Speech API TTS
+    await ttsSpeak(content, { voice, rate, volume, pitch })
+  } catch (err) {
+    console.error('[ChatPage] TTS error:', err)
+    message.error(t('pages.chat.tts.error'))
+    stopTTS()
   }
 }
 
@@ -2562,7 +2610,36 @@ onUnmounted(() => {
     nowTimer = null
   }
   document.removeEventListener('click', handleCodeCopy)
+  // Stop TTS playback
+  stopTTS()
 })
+
+// ---- Auto Play TTS for new assistant messages ----
+
+watch(
+  () => chatStore.messages,
+  (messages) => {
+    // Check if auto-play is enabled
+    if (!ttsSettings.value.autoPlay || !ttsSettings.value.enabled) return
+    
+    // Find the last assistant message
+    const lastAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant')
+    if (!lastAssistantMsg?.id) return
+    
+    // Skip if already played or currently playing
+    if (lastPlayedMessageId.value === lastAssistantMsg.id) return
+    if (playingMessageId.value === lastAssistantMsg.id) return
+    
+    // Skip if currently streaming
+    if (chatStore.sending) return
+    
+    // Play the message
+    console.log('[ChatPage] Auto-playing TTS for message:', lastAssistantMsg.id)
+    lastPlayedMessageId.value = lastAssistantMsg.id
+    playTTS(lastAssistantMsg)
+  },
+  { deep: true }
+)
 
 async function handleRefreshChatData() {
   await sessionStore.fetchSessions()
@@ -2723,6 +2800,10 @@ async function handleSend() {
                     :options="roleFilterOptions"
                     style="width: 132px;"
                   />
+                </NSpace>
+                <NSpace justify="space-between" align="center" style="margin-top: 8px;">
+                  <NText>{{ t('pages.chat.preferences.autoPlay') }}</NText>
+                  <NSwitch v-model:value="ttsSettings.autoPlay" />
                 </NSpace>
               </div>
 
@@ -2950,6 +3031,21 @@ async function handleSend() {
                                 </template>
                                 {{ t('common.copy') }}
                               </NTooltip>
+                              <NTooltip v-if="entry.item.role === 'user' || entry.item.role === 'assistant'">
+                                <template #trigger>
+                                  <NButton
+                                    quaternary
+                                    size="tiny"
+                                    :loading="ttsIsLoading && playingMessageId === entry.item.id"
+                                    @click="playTTS(entry.item)"
+                                  >
+                                    <template #icon>
+                                      <NIcon :component="playingMessageId === entry.item.id ? StopOutline : VolumeHighOutline" />
+                                    </template>
+                                  </NButton>
+                                </template>
+                                {{ playingMessageId === entry.item.id ? t('pages.chat.tts.stop') : t('pages.chat.tts.play') }}
+                              </NTooltip>
                             </div>
                           </div>
 
@@ -2986,6 +3082,21 @@ async function handleSend() {
                                 </NButton>
                               </template>
                               {{ t('common.copy') }}
+                            </NTooltip>
+                            <NTooltip v-if="entry.item.role === 'user' || entry.item.role === 'assistant'">
+                              <template #trigger>
+                                <NButton
+                                  quaternary
+                                  size="tiny"
+                                  :loading="ttsIsLoading && playingMessageId === entry.item.id"
+                                  @click="playTTS(entry.item)"
+                                >
+                                  <template #icon>
+                                    <NIcon :component="playingMessageId === entry.item.id ? StopOutline : VolumeHighOutline" />
+                                  </template>
+                                </NButton>
+                              </template>
+                              {{ playingMessageId === entry.item.id ? t('pages.chat.tts.stop') : t('pages.chat.tts.play') }}
                             </NTooltip>
                           </div>
                         </div>

@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { defineStore } from 'pinia'
 import { useHermesConnectionStore } from './connection'
 import type { HermesMessage, ModelSelection } from '@/api/hermes/types'
@@ -18,11 +18,14 @@ export interface ToolCallProgress {
   emoji?: string
 }
 
+const AUTO_REFRESH_INTERVAL = 3000 // 3秒刷新一次
+
 export const useHermesChatStore = defineStore('hermes-chat', () => {
   // ---- 状态 ----
 
   const messages = ref<HermesMessage[]>([])
   const currentSessionId = ref<string | null>(null)
+  const currentSessionModel = ref<string | undefined>(undefined)
   const loading = ref(false)
   const streaming = ref(false)
   const streamingText = ref('')
@@ -31,6 +34,11 @@ export const useHermesChatStore = defineStore('hermes-chat', () => {
 
   // 工具调用进度追踪
   const activeToolCalls = ref<ToolCallProgress[]>([])
+
+  // 自动刷新相关
+  let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
+  const autoRefreshEnabled = ref(false)
+  const lastMessageCount = ref(0)
 
   // ---- 方法 ----
 
@@ -402,6 +410,7 @@ export const useHermesChatStore = defineStore('hermes-chat', () => {
     })
 
     currentSessionId.value = sessionId
+    currentSessionModel.value = sessionModel
     loading.value = true
     error.value = null
 
@@ -410,6 +419,8 @@ export const useHermesChatStore = defineStore('hermes-chat', () => {
     try {
       const msgs = await client.getSessionMessages(sessionId)
       console.log('[HermesChatStore] Loaded messages:', msgs.length)
+      
+      lastMessageCount.value = msgs.length
       
       // 处理历史消息：从助手消息的 tool_calls 中提取工具名称，关联到工具结果消息
       const processedMsgs: HermesMessage[] = []
@@ -513,14 +524,150 @@ export const useHermesChatStore = defineStore('hermes-chat', () => {
   }
 
   /**
+   * 静默刷新当前会话消息（用于自动刷新，不显示 loading）
+   */
+  async function refreshCurrentSessionMessages() {
+    if (!currentSessionId.value || streaming.value) return
+
+    const connStore = useHermesConnectionStore()
+    const client = await connStore.getClientAsync()
+    if (!client) return
+
+    try {
+      const msgs = await client.getSessionMessages(currentSessionId.value)
+      
+      // 只有当消息数量变化时才更新（避免不必要的 UI 刷新）
+      if (msgs.length !== lastMessageCount.value) {
+        console.log('[HermesChatStore] Session messages updated:', lastMessageCount.value, '->', msgs.length)
+        lastMessageCount.value = msgs.length
+        
+        // 处理消息（简化版，复用 loadSessionMessages 的逻辑）
+        const processedMsgs: HermesMessage[] = []
+        const toolCallMap = new Map<string, string>()
+        let lastToolCallName: string | undefined
+        
+        for (let i = 0; i < msgs.length; i++) {
+          const msg = msgs[i]!
+          
+          if (msg.role === 'assistant') {
+            const rawMsg = msg as unknown as Record<string, unknown>
+            const toolCalls = rawMsg.tool_calls as Array<{ id?: string; function?: { name?: string }; name?: string }> | null
+            
+            if (toolCalls && Array.isArray(toolCalls)) {
+              for (const tc of toolCalls) {
+                const tcName = tc.function?.name || tc.name
+                if (tc.id && tcName) {
+                  toolCallMap.set(tc.id, tcName)
+                  lastToolCallName = tcName
+                }
+              }
+            }
+            
+            if (msg.content) {
+              try {
+                const contentObj = JSON.parse(msg.content)
+                if (contentObj.tool_calls && Array.isArray(contentObj.tool_calls)) {
+                  for (const tc of contentObj.tool_calls) {
+                    if (tc.id && (tc.function?.name || tc.name || tc.tool_name)) {
+                      toolCallMap.set(tc.id, tc.function?.name || tc.name || tc.tool_name)
+                      lastToolCallName = tc.function?.name || tc.name || tc.tool_name
+                    }
+                  }
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
+          
+          if (msg.role === 'tool') {
+            let toolName = msg.toolName || msg.name
+            
+            if (!toolName && msg.content) {
+              try {
+                const parsed = JSON.parse(msg.content)
+                toolName = parsed.tool_name || parsed.name || parsed.toolName
+              } catch {
+                // ignore
+              }
+            }
+            
+            if (!toolName && msg.toolCallId) {
+              toolName = toolCallMap.get(msg.toolCallId)
+            }
+            
+            if (!toolName && lastToolCallName) {
+              toolName = lastToolCallName
+            }
+            
+            if (!toolName && i > 0) {
+              const prevMsg = processedMsgs[processedMsgs.length - 1]
+              if (prevMsg?.role === 'assistant') {
+                const rawPrevMsg = prevMsg as unknown as Record<string, unknown>
+                const prevToolCalls = rawPrevMsg.tool_calls as Array<{ function?: { name?: string }; name?: string }> | null
+                if (prevToolCalls && prevToolCalls.length > 0) {
+                  const lastTc = prevToolCalls[prevToolCalls.length - 1]
+                  toolName = lastTc?.function?.name || lastTc?.name
+                }
+              }
+            }
+            
+            processedMsgs.push({
+              ...msg,
+              toolName: toolName || undefined,
+            })
+          } else if (msg.role === 'assistant' && !msg.model && currentSessionModel.value) {
+            processedMsgs.push({ ...msg, model: currentSessionModel.value })
+          } else {
+            processedMsgs.push(msg)
+          }
+        }
+        
+        messages.value = processedMsgs
+      }
+    } catch (err) {
+      console.error('[HermesChatStore] refreshCurrentSessionMessages failed:', err)
+    }
+  }
+
+  /**
+   * 启动自动刷新
+   */
+  function startAutoRefresh() {
+    if (autoRefreshTimer) {
+      clearInterval(autoRefreshTimer)
+    }
+    autoRefreshEnabled.value = true
+    autoRefreshTimer = setInterval(() => {
+      refreshCurrentSessionMessages()
+    }, AUTO_REFRESH_INTERVAL)
+    console.log('[HermesChatStore] Auto-refresh started')
+  }
+
+  /**
+   * 停止自动刷新
+   */
+  function stopAutoRefresh() {
+    if (autoRefreshTimer) {
+      clearInterval(autoRefreshTimer)
+      autoRefreshTimer = null
+    }
+    autoRefreshEnabled.value = false
+    console.log('[HermesChatStore] Auto-refresh stopped')
+  }
+
+  /**
    * 清空消息
    */
   function clearMessages() {
+    stopAutoRefresh()
     messages.value = []
     streamingText.value = ''
     error.value = null
     activeToolCalls.value = []
     currentSessionId.value = null
+    currentSessionModel.value = undefined
+    lastMessageCount.value = 0
     if (abortController.value) {
       abortController.value.abort()
       abortController.value = null
@@ -538,16 +685,21 @@ export const useHermesChatStore = defineStore('hermes-chat', () => {
     // 状态
     messages,
     currentSessionId,
+    currentSessionModel,
     loading,
     streaming,
     streamingText,
     error,
     abortController,
     activeToolCalls,
+    autoRefreshEnabled,
     // 方法
     sendMessage,
     stopGeneration,
     loadSessionMessages,
+    refreshCurrentSessionMessages,
+    startAutoRefresh,
+    stopAutoRefresh,
     clearMessages,
     setSessionId,
   }

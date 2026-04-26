@@ -31,6 +31,8 @@ import {
   ChevronForwardOutline,
   CopyOutline,
   ChatbubblesOutline,
+  VolumeHighOutline,
+  StopOutline,
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useHermesChatStore } from '@/stores/hermes/chat'
@@ -39,6 +41,8 @@ import { useHermesModelStore } from '@/stores/hermes/model'
 import { useHermesSkillStore } from '@/stores/hermes/skill'
 import { useHermesConnectionStore } from '@/stores/hermes/connection'
 import { useHermesConfigStore } from '@/stores/hermes/config'
+import { useEdgeTTS } from '@/composables/useEdgeTTS'
+import { useTTSSettings } from '@/composables/useTTSSettings'
 import { renderSimpleMarkdown } from '@/utils/markdown'
 import type { HermesMessage, ModelSelection } from '@/api/hermes/types'
 
@@ -137,6 +141,13 @@ const sideCollapsed = ref(false)
 // Copy state
 const copiedMessageId = ref<string | null>(null)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
+
+// TTS state
+const playingMessageId = ref<string | null>(null)
+const { speak: ttsSpeak, stop: ttsStop, isPlaying: ttsIsPlaying, isLoading: ttsIsLoading } = useEdgeTTS({
+  voice: 'zh-CN',
+})
+const { settings: ttsSettings, updateSettings: updateTTSSettings } = useTTSSettings()
 
 // Quick replies
 const quickReplies = ref<QuickReply[]>([])
@@ -615,9 +626,88 @@ const sessionOptions = computed(() =>
   })),
 )
 
+// Platform display configuration
+const platformConfig: Record<string, { color: string; label: string; icon?: string }> = {
+  telegram: { color: '#0088cc', label: 'Telegram' },
+  discord: { color: '#5865F2', label: 'Discord' },
+  slack: { color: '#4A154B', label: 'Slack' },
+  whatsapp: { color: '#25D366', label: 'WhatsApp' },
+  signal: { color: '#3A76F0', label: 'Signal' },
+  matrix: { color: '#0DBD8B', label: 'Matrix' },
+  mattermost: { color: '#0058CC', label: 'Mattermost' },
+  email: { color: '#EA4335', label: 'Email' },
+  sms: { color: '#6B7280', label: 'SMS' },
+  dingtalk: { color: '#0089FF', label: '钉钉' },
+  feishu: { color: '#3370FF', label: '飞书' },
+  wecom: { color: '#2B7D39', label: '企业微信' },
+  wechat: { color: '#07C160', label: '微信' },
+  cli: { color: '#6B7280', label: 'CLI' },
+  tui: { color: '#6B7280', label: 'TUI' },
+  webui: { color: '#3B82F6', label: 'Web' },
+  api: { color: '#8B5CF6', label: 'API' },
+}
+
+function getPlatformInfo(platform?: string) {
+  if (!platform) return null
+  const key = platform.toLowerCase()
+  return platformConfig[key] || { color: '#6B7280', label: platform }
+}
+
 function renderSessionLabel(option: { label: string; value: string }) {
   const session = sessionStore.sessions.find((s) => s.id === option.value)
   const fullText = session ? `[${session.id}] ${session.title || session.id}` : option.label
+  const platformInfo = session?.platform ? getPlatformInfo(session.platform) : null
+  
+  if (platformInfo) {
+    return h(
+      'div',
+      {
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          overflow: 'hidden',
+        },
+      },
+      [
+        h('span', {
+          style: {
+            display: 'inline-block',
+            width: '6px',
+            height: '6px',
+            borderRadius: '50%',
+            backgroundColor: platformInfo.color,
+            flexShrink: '0',
+          },
+        }),
+        h(
+          'span',
+          {
+            title: fullText,
+            style: {
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flex: '1',
+            },
+          },
+          option.label,
+        ),
+        h(
+          'span',
+          {
+            style: {
+              fontSize: '10px',
+              color: '#999',
+              flexShrink: '0',
+            },
+          },
+          platformInfo.label,
+        ),
+      ],
+    )
+  }
+  
   return h(
     'span',
     {
@@ -714,6 +804,10 @@ onUnmounted(() => {
     clearTimeout(copiedTimer)
     copiedTimer = null
   }
+  // 停止自动刷新
+  chatStore.stopAutoRefresh()
+  // 停止 TTS 播放
+  stopTTS()
 })
 
 // ---- Scroll Logic ----
@@ -940,6 +1034,8 @@ async function handleSelectSession(sessionId: string) {
     autoFollowBottom.value = true
     showScrollToBottomBtn.value = false
     nextTick(() => requestScrollToBottom({ force: true }))
+    // 启动自动刷新，实现多终端联动
+    chatStore.startAutoRefresh()
   } catch {
     message.error(t('pages.hermesChat.loadMessagesFailed'))
   }
@@ -1439,6 +1535,75 @@ async function copyMessageContent(msg: HermesMessage) {
   }
 }
 
+// ---- Text-to-Speech ----
+
+function stopTTS() {
+  ttsStop()
+  playingMessageId.value = null
+}
+
+async function playTTS(msg: HermesMessage) {
+  const content = msg.content || ''
+  if (!content.trim()) return
+
+  // If already playing this message, stop it
+  if (playingMessageId.value === msg.id) {
+    stopTTS()
+    return
+  }
+
+  // Stop any current playback
+  stopTTS()
+
+  try {
+    playingMessageId.value = msg.id || null
+
+    // Use TTS settings from local storage
+    const voice = ttsSettings.value.voice || 'zh-CN'
+    const rate = ttsSettings.value.rate ?? 1.0
+    const volume = ttsSettings.value.volume ?? 1.0
+    const pitch = ttsSettings.value.pitch ?? 1.0
+
+    console.log('[HermesChat] TTS settings:', { voice, rate, volume, pitch })
+
+    // Use Web Speech API TTS
+    await ttsSpeak(content, { voice, rate, volume, pitch })
+  } catch (err) {
+    console.error('[HermesChat] TTS error:', err)
+    message.error(t('pages.hermesChat.tts.error'))
+    stopTTS()
+  }
+}
+
+// ---- Auto Play TTS for new assistant messages ----
+
+const lastPlayedMessageId = ref<string | null>(null)
+
+watch(
+  () => chatStore.messages,
+  (messages) => {
+    // Check if auto-play is enabled
+    if (!ttsSettings.value.autoPlay || !ttsSettings.value.enabled) return
+    
+    // Find the last assistant message
+    const lastAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant')
+    if (!lastAssistantMsg?.id) return
+    
+    // Skip if already played or currently playing
+    if (lastPlayedMessageId.value === lastAssistantMsg.id) return
+    if (playingMessageId.value === lastAssistantMsg.id) return
+    
+    // Skip if currently streaming
+    if (chatStore.streaming) return
+    
+    // Play the message
+    console.log('[HermesChat] Auto-playing TTS for message:', lastAssistantMsg.id)
+    lastPlayedMessageId.value = lastAssistantMsg.id
+    playTTS(lastAssistantMsg)
+  },
+  { deep: true }
+)
+
 // ---- Time Formatting ----
 
 function formatMessageTime(timestamp?: string | number): string {
@@ -1782,6 +1947,10 @@ function handleSaveQuickReply() {
                   <NSwitch v-model:value="autoFollowBottom" />
                 </NSpace>
                 <NSpace justify="space-between" align="center" style="margin-top: 8px;">
+                  <NText>{{ t('pages.hermesChat.preferences.autoPlay') }}</NText>
+                  <NSwitch v-model:value="ttsSettings.autoPlay" />
+                </NSpace>
+                <NSpace justify="space-between" align="center" style="margin-top: 8px;">
                   <NText>{{ t('pages.hermesChat.filters.title') }}</NText>
                   <NSelect
                     v-model:value="roleFilter"
@@ -1798,13 +1967,24 @@ function handleSaveQuickReply() {
                   <span>{{ t('pages.hermesChat.sessionInfo.title') }}</span>
                   <code class="chat-kv-label">{{ selectedSession.title || selectedSession.id }}</code>
                 </div>
+                <div class="chat-kv-row">
+                  <span>{{ t('pages.hermesChat.sessionInfo.sessionId') }}</span>
+                  <code class="chat-kv-label" style="font-size: 11px;">{{ selectedSession.id }}</code>
+                </div>
                 <div v-if="selectedSession.model" class="chat-kv-row">
                   <span>{{ t('pages.hermesChat.sessionInfo.model') }}</span>
                   <NTag size="small" :bordered="false" round>{{ selectedSession.model }}</NTag>
                 </div>
                 <div v-if="selectedSession.platform" class="chat-kv-row">
                   <span>{{ t('pages.hermesChat.sessionInfo.platform') }}</span>
-                  <NTag size="small" :bordered="false" round type="info">{{ selectedSession.platform }}</NTag>
+                  <NTag 
+                    size="small" 
+                    :bordered="false" 
+                    round 
+                    :style="{ backgroundColor: getPlatformInfo(selectedSession.platform)?.color + '20', color: getPlatformInfo(selectedSession.platform)?.color }"
+                  >
+                    {{ getPlatformInfo(selectedSession.platform)?.label || selectedSession.platform }}
+                  </NTag>
                 </div>
                 <div class="chat-kv-row">
                   <span>{{ t('pages.hermesChat.sessionInfo.messages') }}</span>
@@ -1813,6 +1993,12 @@ function handleSaveQuickReply() {
                 <div v-if="selectedSession.createdAt" class="chat-kv-row">
                   <span>{{ t('pages.hermesChat.sessionInfo.created') }}</span>
                   <code>{{ formatSessionDate(selectedSession.createdAt) }}</code>
+                </div>
+                <div v-if="chatStore.autoRefreshEnabled" class="chat-kv-row">
+                  <span>{{ t('pages.hermesChat.sessionInfo.syncStatus') }}</span>
+                  <NTag size="small" :bordered="false" round type="success">
+                    {{ t('pages.hermesChat.sessionInfo.syncing') }}
+                  </NTag>
                 </div>
               </div>
             </NSpace>
@@ -1994,7 +2180,7 @@ function handleSaveQuickReply() {
                             <div class="chat-bubble-content structured-plain-text chat-markdown"
                               v-html="renderChatMarkdown(entry.structured.plainTexts.join('\n'), entry.item.role)"
                             ></div>
-                            <div class="chat-content-copy-btn">
+                            <div class="chat-content-actions">
                               <NTooltip>
                                 <template #trigger>
                                   <NButton quaternary size="tiny" @click="copyMessageContent(entry.item)">
@@ -2004,6 +2190,21 @@ function handleSaveQuickReply() {
                                   </NButton>
                                 </template>
                                 {{ t('common.copy') }}
+                              </NTooltip>
+                              <NTooltip v-if="entry.item.role === 'user' || entry.item.role === 'assistant'">
+                                <template #trigger>
+                                  <NButton
+                                    quaternary
+                                    size="tiny"
+                                    :loading="ttsIsLoading && playingMessageId === entry.item.id"
+                                    @click="playTTS(entry.item)"
+                                  >
+                                    <template #icon>
+                                      <NIcon :component="playingMessageId === entry.item.id ? StopOutline : VolumeHighOutline" />
+                                    </template>
+                                  </NButton>
+                                </template>
+                                {{ playingMessageId === entry.item.id ? t('pages.hermesChat.tts.stop') : t('pages.hermesChat.tts.play') }}
                               </NTooltip>
                             </div>
                           </div>
@@ -2020,7 +2221,7 @@ function handleSaveQuickReply() {
                             class="chat-bubble-content"
                             v-html="renderChatMarkdown(entry.item.content, entry.item.role)"
                           ></div>
-                          <div class="chat-content-copy-btn">
+                          <div class="chat-content-actions">
                             <NTooltip>
                               <template #trigger>
                                 <NButton
@@ -2035,6 +2236,21 @@ function handleSaveQuickReply() {
                                 </NButton>
                               </template>
                               {{ t('common.copy') }}
+                            </NTooltip>
+                            <NTooltip v-if="entry.item.role === 'user' || entry.item.role === 'assistant'">
+                              <template #trigger>
+                                <NButton
+                                  quaternary
+                                  size="tiny"
+                                  :loading="ttsIsLoading && playingMessageId === entry.item.id"
+                                  @click="playTTS(entry.item)"
+                                >
+                                  <template #icon>
+                                    <NIcon :component="playingMessageId === entry.item.id ? StopOutline : VolumeHighOutline" />
+                                  </template>
+                                </NButton>
+                              </template>
+                              {{ playingMessageId === entry.item.id ? t('pages.hermesChat.tts.stop') : t('pages.hermesChat.tts.play') }}
                             </NTooltip>
                           </div>
                         </div>
@@ -2585,16 +2801,18 @@ function handleSaveQuickReply() {
   word-break: break-word;
 }
 
-.chat-content-copy-btn {
+.chat-content-actions {
   position: absolute;
   top: 0;
   right: 0;
   opacity: 0;
   transition: opacity 0.2s ease;
   z-index: 10;
+  display: flex;
+  gap: 4px;
 }
 
-.chat-bubble-content-wrapper:hover .chat-content-copy-btn {
+.chat-bubble-content-wrapper:hover .chat-content-actions {
   opacity: 1;
 }
 

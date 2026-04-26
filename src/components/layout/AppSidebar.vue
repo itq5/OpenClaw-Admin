@@ -100,13 +100,19 @@ function handleSelect(key: string) {
 <template>
   <div style="display: flex; flex-direction: column; height: 100%;">
     <div style="display: flex; align-items: center; padding: 20px 24px; gap: 10px;">
-      <span style="font-size: 24px;">{{ connStore.currentGateway === 'hermes' ? '&#x1F54A;&#xFE0F;' : '&#x1F99E;' }}</span>
+      <img
+        v-if="connStore.currentGateway === 'hermes'"
+        src="/hermes-logo.png"
+        alt="Hermes"
+        style="width: 24px; height: 24px; object-fit: contain;"
+      />
+      <span v-else style="font-size: 24px;">🦞</span>
       <NText
         v-if="!collapsed"
         strong
         style="font-size: 18px; white-space: nowrap; letter-spacing: -0.5px;"
       >
-        {{ connStore.currentGateway === 'hermes' ? 'Hermes' : 'OpenClaw-Admin' }}
+        {{ connStore.currentGateway === 'hermes' ? 'Hermes Agent' : 'OpenClaw-Admin' }}
       </NText>
     </div>
 

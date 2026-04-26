@@ -186,6 +186,12 @@ export interface HermesSkill {
   enabled: boolean
   category?: string
   config?: Record<string, unknown>
+  path?: string
+  source?: string
+  trust_level?: string
+  tags?: string[]
+  author?: string
+  installed?: boolean
 }
 
 // --- 定时任务相关 ---
@@ -360,6 +366,7 @@ export interface HermesCustomProvider {
   api_mode?: 'chat_completions' | 'anthropic_messages'
   models?: Record<string, { context_length?: number }>
   model?: string
+  context_window?: number
 }
 
 export const HERMES_PROVIDERS: HermesProviderConfig[] = [

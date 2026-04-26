@@ -1,7 +1,7 @@
 {
   "name": "claw-admin",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -29,6 +29,7 @@
     "check-disk-space": "^3.4.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
+    "edge-tts-client": "^1.0.2",
     "express": "^5.2.1",
     "highlight.js": "^11.11.1",
     "js-yaml": "^4.1.1",

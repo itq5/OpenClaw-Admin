@@ -9,6 +9,8 @@ import {
   NGridItem,
   NIcon,
   NInput,
+  NInputNumber,
+  NModal,
   NSelect,
   NSpace,
   NSpin,
@@ -89,9 +91,17 @@ const customProviderFormName = ref('')
 const customProviderFormBaseUrl = ref('')
 const customProviderFormApiKey = ref('')
 const customProviderFormModel = ref('')
+const customProviderFormContextWindow = ref<number | null>(null)
 const customProviderFormSaving = ref(false)
 const customProviderFormModels = ref<{ id: string; name?: string }[]>([])
 const customProviderFormModelsLoading = ref(false)
+
+// ---- 设置默认模型弹窗 ----
+
+const showSetDefaultModelModal = ref(false)
+const setDefaultModelId = ref('')
+const setDefaultModelContextWindow = ref<number | null>(null)
+const setDefaultModelSaving = ref(false)
 
 // ---- 可用模型列表 ----
 
@@ -242,13 +252,30 @@ async function fetchAvailableModels() {
   }
 }
 
-async function selectModel(modelId: string) {
+function openSetDefaultModelModal(modelId: string) {
+  setDefaultModelId.value = modelId
+  // 尝试从现有配置中获取上下文窗口大小
+  const provider = displayProvider.value
+  if (provider) {
+    const existingProvider = customProviders.value.find(
+      p => p.name === provider.id || p.base_url === provider.base_url
+    )
+    setDefaultModelContextWindow.value = existingProvider?.context_window || null
+  } else {
+    setDefaultModelContextWindow.value = null
+  }
+  showSetDefaultModelModal.value = true
+}
+
+async function confirmSetDefaultModel() {
+  const modelId = setDefaultModelId.value
   const provider = displayProvider.value
   if (!provider) {
     message.error(t('pages.hermesModels.setModelFailed'))
     return
   }
 
+  setDefaultModelSaving.value = true
   try {
     // 根据 Hermes 配置格式构建配置
     // model.default 只是模型名称
@@ -277,27 +304,34 @@ async function selectModel(modelId: string) {
       model: modelConfig,
     }
     
-    // 更新 custom_providers 中对应项的 model 字段
+    // 更新 custom_providers 中对应项的 model 和 context_window 字段
     const existingProviders = [...customProviders.value]
     const providerIndex = existingProviders.findIndex(
       p => p.name === provider.id || p.base_url === provider.base_url
     )
     
     if (providerIndex >= 0) {
-      // 更新现有 provider 的 model 字段
+      // 更新现有 provider 的 model 和 context_window 字段
       const currentProvider = existingProviders[providerIndex]!
       existingProviders[providerIndex] = {
         ...currentProvider,
         model: modelId,
+      }
+      // 如果设置了上下文窗口大小，添加到配置中
+      if (setDefaultModelContextWindow.value && setDefaultModelContextWindow.value > 0) {
+        existingProviders[providerIndex]!.context_window = setDefaultModelContextWindow.value
       }
       configUpdate.custom_providers = existingProviders
     }
     
     await configStore.updateConfig(configUpdate as any)
     message.success(t('pages.hermesModels.setModelSuccess', { model: modelId }))
+    showSetDefaultModelModal.value = false
     await configStore.fetchConfig()
   } catch {
     message.error(t('pages.hermesModels.setModelFailed'))
+  } finally {
+    setDefaultModelSaving.value = false
   }
 }
 
@@ -934,6 +968,8 @@ function handleEditCustomProvider(provider: HermesCustomProvider) {
   customProviderFormApiKey.value = ''
   // 显示该端点配置的模型（custom_providers[].model）
   customProviderFormModel.value = provider.model || ''
+  // 显示上下文窗口大小
+  customProviderFormContextWindow.value = provider.context_window || null
   showCustomProviderForm.value = true
 }
 
@@ -944,6 +980,7 @@ function handleCancelCustomProviderForm() {
   customProviderFormBaseUrl.value = ''
   customProviderFormApiKey.value = ''
   customProviderFormModel.value = ''
+  customProviderFormContextWindow.value = null
   customProviderFormModels.value = []
 }
 
@@ -972,6 +1009,11 @@ async function handleSaveCustomProvider() {
     // 注意：这只是该端点的模型配置，不是全局默认模型
     if (customProviderFormModel.value.trim()) {
       newProvider.model = customProviderFormModel.value.trim()
+    }
+
+    // 如果设置了上下文窗口大小
+    if (customProviderFormContextWindow.value && customProviderFormContextWindow.value > 0) {
+      newProvider.context_window = customProviderFormContextWindow.value
     }
 
     const existingProviders = [...customProviders.value]
@@ -1154,7 +1196,7 @@ async function handleDeleteCustomProvider(providerName: string) {
                               type="primary"
                               secondary
                               round
-                              @click.stop="selectModel(model.id)"
+                              @click.stop="openSetDefaultModelModal(model.id)"
                             >
                               <template #icon><NIcon :component="StarOutline" :size="10" /></template>
                               {{ t('pages.hermesModels.modelStatus.setGlobalDefault') }}
@@ -1257,7 +1299,7 @@ async function handleDeleteCustomProvider(providerName: string) {
                           type="primary"
                           secondary
                           round
-                          @click.stop="selectModel(model.id)"
+                          @click.stop="openSetDefaultModelModal(model.id)"
                         >
                           <template #icon><NIcon :component="StarOutline" :size="12" /></template>
                           {{ t('pages.hermesModels.modelStatus.setGlobalDefault') }}
@@ -1515,6 +1557,14 @@ async function handleDeleteCustomProvider(providerName: string) {
                     <NText depth="3" class="config-label">API Key:</NText>
                     <NText class="config-value">{{ maskApiKey(provider.api_key) }}</NText>
                   </div>
+                  <div v-if="provider.model" class="config-item">
+                    <NText depth="3" class="config-label">Model:</NText>
+                    <NText class="config-value">{{ provider.model }}</NText>
+                  </div>
+                  <div v-if="provider.context_window" class="config-item">
+                    <NText depth="3" class="config-label">Context:</NText>
+                    <NText class="config-value">{{ provider.context_window.toLocaleString() }} tokens</NText>
+                  </div>
                 </div>
 
                 <div class="provider-actions">
@@ -1741,6 +1791,24 @@ async function handleDeleteCustomProvider(providerName: string) {
             </NText>
           </div>
 
+          <!-- 上下文窗口大小 -->
+          <div>
+            <NText strong style="font-size: 14px; display: block; margin-bottom: 8px;">
+              {{ t('pages.hermesModels.customProvider.contextWindow') }}
+            </NText>
+            <NInputNumber
+              v-model:value="customProviderFormContextWindow"
+              :placeholder="t('pages.hermesModels.customProvider.contextWindowPlaceholder')"
+              :min="1"
+              :max="10000000"
+              clearable
+              style="width: 100%;"
+            />
+            <NText depth="3" style="font-size: 12px; display: block; margin-top: 4px;">
+              {{ t('pages.hermesModels.customProvider.contextWindowHint') }}
+            </NText>
+          </div>
+
           <NSpace :size="8" justify="end">
             <NButton class="app-toolbar-btn" @click="handleCancelCustomProviderForm">
               {{ t('common.cancel') }}
@@ -1758,6 +1826,39 @@ async function handleDeleteCustomProvider(providerName: string) {
         </NSpace>
       </NCard>
     </div>
+
+    <!-- 设置默认模型弹窗 -->
+    <NModal
+      v-model:show="showSetDefaultModelModal"
+      preset="dialog"
+      :title="t('pages.hermesModels.modelStatus.setDefaultTitle')"
+      :positive-text="t('common.confirm')"
+      :negative-text="t('common.cancel')"
+      :loading="setDefaultModelSaving"
+      @positive-click="confirmSetDefaultModel"
+    >
+      <NSpace vertical :size="16">
+        <div>
+          <NText depth="3">{{ t('pages.hermesModels.modelStatus.setModelConfirm', { model: setDefaultModelId }) }}</NText>
+        </div>
+        <div>
+          <NText strong style="font-size: 14px; display: block; margin-bottom: 8px;">
+            {{ t('pages.hermesModels.customProvider.contextWindow') }}
+          </NText>
+          <NInputNumber
+            v-model:value="setDefaultModelContextWindow"
+            :placeholder="t('pages.hermesModels.customProvider.contextWindowPlaceholder')"
+            :min="1"
+            :max="10000000"
+            clearable
+            style="width: 100%;"
+          />
+          <NText depth="3" style="font-size: 12px; display: block; margin-top: 4px;">
+            {{ t('pages.hermesModels.customProvider.contextWindowHint') }}
+          </NText>
+        </div>
+      </NSpace>
+    </NModal>
   </div>
 </template>
 

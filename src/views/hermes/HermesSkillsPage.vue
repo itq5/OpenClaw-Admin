@@ -24,15 +24,20 @@ import {
   RefreshOutline,
   SearchOutline,
   StopCircleOutline,
+  FolderOpenOutline,
+  ChevronDownOutline,
+  ChevronUpOutline,
 } from '@vicons/ionicons5'
 import { useI18n } from 'vue-i18n'
 import { useHermesSkillStore } from '@/stores/hermes/skill'
+import SkillFileBrowser from '@/components/hermes/SkillFileBrowser.vue'
 
 const { t } = useI18n()
 const skillStore = useHermesSkillStore()
 const message = useMessage()
 const searchQuery = ref('')
 const categoryFilter = ref<string>('all')
+const expandedSkill = ref<string | null>(null)
 
 // ---- 分类颜色映射 ----
 
@@ -115,6 +120,18 @@ async function handleToggle(name: string, enabled: boolean) {
     message.error(t('pages.hermesSkills.toggleFailed'))
   }
 }
+
+function handleSkillClick(skillName: string) {
+  if (expandedSkill.value === skillName) {
+    expandedSkill.value = null
+  } else {
+    expandedSkill.value = skillName
+  }
+}
+
+function handleCloseBrowser() {
+  expandedSkill.value = null
+}
 </script>
 
 <template>
@@ -138,7 +155,7 @@ async function handleToggle(name: string, enabled: boolean) {
       </NAlert>
 
       <!-- 统计卡片 -->
-      <NGrid cols="1 s:2 m:4" responsive="screen" :x-gap="10" :y-gap="10">
+      <NGrid cols="4" :x-gap="10" :y-gap="10">
         <NGridItem>
           <NCard embedded :bordered="false" class="hermes-metric-card">
             <NSpace justify="space-between" align="center">
@@ -206,11 +223,11 @@ async function handleToggle(name: string, enabled: boolean) {
       </template>
 
       <NSpin :show="skillStore.loading">
-        <NGrid v-if="filteredSkills.length > 0" cols="1 s:2 m:3" responsive="screen" :x-gap="12" :y-gap="12">
-          <NGridItem v-for="skill in filteredSkills" :key="skill.name">
-            <div class="hermes-skill-card" :class="{ 'hermes-skill-card--disabled': !skill.enabled }">
+        <div v-if="filteredSkills.length > 0" class="skills-list">
+          <template v-for="skill in filteredSkills" :key="skill.name">
+            <div class="hermes-skill-card" :class="{ 'hermes-skill-card--disabled': !skill.enabled, 'hermes-skill-card--expanded': expandedSkill === skill.name }">
               <!-- 头部：名称 + 标签 -->
-              <div class="hermes-skill-card__header">
+              <div class="hermes-skill-card__header" @click="handleSkillClick(skill.name)">
                 <NText strong class="hermes-skill-card__name">{{ skill.name }}</NText>
                 <NSpace :size="6" align="center">
                   <NTag
@@ -231,6 +248,11 @@ async function handleToggle(name: string, enabled: boolean) {
                   >
                     {{ skill.category }}
                   </NTag>
+                  <NIcon 
+                    :component="expandedSkill === skill.name ? ChevronUpOutline : ChevronDownOutline" 
+                    size="16"
+                    class="hermes-skill-card__expand-icon"
+                  />
                 </NSpace>
               </div>
 
@@ -238,20 +260,32 @@ async function handleToggle(name: string, enabled: boolean) {
               <NText
                 depth="3"
                 class="hermes-skill-card__desc"
+                @click="handleSkillClick(skill.name)"
               >
                 {{ skill.description || t('common.noDescription') }}
               </NText>
 
               <!-- 底部：状态 + 开关 -->
               <div class="hermes-skill-card__footer">
-                <NTag
-                  size="small"
-                  :bordered="false"
-                  round
-                  :type="skill.enabled ? 'success' : 'default'"
-                >
-                  {{ skill.enabled ? t('common.enabled') : t('common.disabled') }}
-                </NTag>
+                <NSpace :size="8" align="center">
+                  <NTag
+                    size="small"
+                    :bordered="false"
+                    round
+                    :type="skill.enabled ? 'success' : 'default'"
+                  >
+                    {{ skill.enabled ? t('common.enabled') : t('common.disabled') }}
+                  </NTag>
+                  <NButton 
+                    size="tiny" 
+                    quaternary 
+                    type="info"
+                    @click.stop="handleSkillClick(skill.name)"
+                  >
+                    <template #icon><NIcon :component="FolderOpenOutline" /></template>
+                    {{ t('pages.hermesSkills.viewFiles') }}
+                  </NButton>
+                </NSpace>
                 <NSwitch
                   :value="skill.enabled"
                   size="small"
@@ -259,8 +293,19 @@ async function handleToggle(name: string, enabled: boolean) {
                 />
               </div>
             </div>
-          </NGridItem>
-        </NGrid>
+            
+            <!-- 技能文件浏览器（紧跟在展开的技能卡片后面） -->
+            <div v-if="expandedSkill === skill.name" class="skill-file-browser-wrapper">
+              <SkillFileBrowser
+                :skill-name="skill.name"
+                :skill-category="skill.category"
+                :skill-path="skill.path"
+                auto-open-file="SKILL.md"
+                @close="handleCloseBrowser"
+              />
+            </div>
+          </template>
+        </div>
 
         <NText v-else-if="!skillStore.loading" depth="3" class="hermes-empty">
           {{ t('common.empty') }}
@@ -315,6 +360,31 @@ async function handleToggle(name: string, enabled: boolean) {
   gap: 8px;
 }
 
+/* ---- 技能列表 ---- */
+
+.skills-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 1200px) {
+  .skills-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .skills-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+.skill-file-browser-wrapper {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
 /* ---- 技能卡片 ---- */
 
 .hermes-skill-card {
@@ -348,6 +418,7 @@ async function handleToggle(name: string, enabled: boolean) {
   justify-content: space-between;
   align-items: flex-start;
   gap: 8px;
+  cursor: pointer;
 }
 
 .hermes-skill-card__name {
@@ -355,6 +426,20 @@ async function handleToggle(name: string, enabled: boolean) {
   font-weight: 600;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.hermes-skill-card__expand-icon {
+  color: var(--text-tertiary);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.hermes-skill-card:hover .hermes-skill-card__expand-icon {
+  color: var(--link-color);
+}
+
+.hermes-skill-card--expanded {
+  border-color: rgba(22, 163, 74, 0.4);
 }
 
 .hermes-skill-card__desc {

@@ -22,6 +22,9 @@ import {
   NRadioButton,
   NTooltip,
   NUpload,
+  NSlider,
+  NSelect,
+  NSwitch,
   type UploadFileInfo,
   useMessage,
 } from 'naive-ui'

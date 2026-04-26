@@ -26,7 +26,12 @@ export const useHermesSkillStore = defineStore('hermes-skill', () => {
     lastError.value = null
 
     try {
-      skills.value = await client.listSkills()
+      const result = await client.listSkills()
+      console.log('[HermesSkillStore] Skills response:', result)
+      if (result && result.length > 0) {
+        console.log('[HermesSkillStore] First skill sample:', JSON.stringify(result[0], null, 2))
+      }
+      skills.value = result
     } catch (error) {
       skills.value = []
       lastError.value = error instanceof Error ? error.message : String(error)
