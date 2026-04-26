@@ -2793,6 +2793,10 @@ async function handleSend() {
                   <NSwitch v-model:value="autoFollowBottom" />
                 </NSpace>
                 <NSpace justify="space-between" align="center" style="margin-top: 8px;">
+                  <NText>{{ t('pages.chat.preferences.autoPlay') }}</NText>
+                  <NSwitch v-model:value="ttsSettings.autoPlay" />
+                </NSpace>
+                <NSpace justify="space-between" align="center" style="margin-top: 8px;">
                   <NText>{{ t('pages.chat.filters.title') }}</NText>
                   <NSelect
                     v-model:value="roleFilter"
@@ -2800,10 +2804,6 @@ async function handleSend() {
                     :options="roleFilterOptions"
                     style="width: 132px;"
                   />
-                </NSpace>
-                <NSpace justify="space-between" align="center" style="margin-top: 8px;">
-                  <NText>{{ t('pages.chat.preferences.autoPlay') }}</NText>
-                  <NSwitch v-model:value="ttsSettings.autoPlay" />
                 </NSpace>
               </div>
 

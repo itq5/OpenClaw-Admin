@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, h, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import {
   NAlert,
   NButton,
@@ -58,7 +58,6 @@ const fitAddon = shallowRef<any>(null)
 const resizeObserver = shallowRef<ResizeObserver | null>(null)
 
 const showLaunchConfig = ref(true)
-const showAdvancedOptions = ref(false)
 
 const launchConfigExpandedNames = computed<string[]>(() =>
   showLaunchConfig.value ? ['launch-config'] : [],
@@ -132,7 +131,7 @@ function buildCliArgs(): string[] {
 const editingSessionId = ref<string | null>(null)
 const editingSessionName = ref('')
 
-const hermesSessions = ref<Array<{ id: string; title?: string; model?: string; preview?: string; started_at?: number; last_active?: number }>>([])
+const hermesSessions = ref<Array<{ id?: string; session_id?: string; title?: string; model?: string; preview?: string; started_at?: number; last_active?: number }>>([])
 const hermesSessionsLoading = ref(false)
 const hermesConnectionStore = useHermesConnectionStore()
 
@@ -151,10 +150,11 @@ async function fetchHermesSessions() {
     if (response.ok) {
       const data = await response.json()
       const rawSessions = Array.isArray(data) ? data : (data.sessions || [])
+      console.log('[HermesCliPage] Fetched sessions:', rawSessions.slice(0, 3))
       hermesSessions.value = rawSessions
     }
-  } catch {
-    // Ignore
+  } catch (error) {
+    console.error('[HermesCliPage] fetchHermesSessions failed:', error)
   } finally {
     hermesSessionsLoading.value = false
   }
@@ -180,14 +180,15 @@ function formatSessionTime(timestamp?: number): string {
 
 const hermesSessionOptions = computed(() => {
   return hermesSessions.value.map(s => {
+    const sessionId = s.session_id || s.id || ''
     const parts: string[] = []
+    
+    parts.push(`[${sessionId}]`)
     
     if (s.title) {
       parts.push(s.title)
     } else if (s.preview) {
-      parts.push(s.preview.slice(0, 30) + (s.preview.length > 30 ? '...' : ''))
-    } else {
-      parts.push(s.id.slice(0, 8))
+      parts.push(s.preview)
     }
     
     const meta: string[] = []
@@ -202,12 +203,32 @@ const hermesSessionOptions = computed(() => {
       parts.push(`(${meta.join(' · ')})`)
     }
     
+    const fullLabel = parts.join(' ')
+    
+    const displayParts: string[] = []
+    displayParts.push(`[${sessionId.slice(0, 12)}]`)
+    
+    if (s.title) {
+      displayParts.push(s.title)
+    } else if (s.preview) {
+      displayParts.push(s.preview.slice(0, 25) + (s.preview.length > 25 ? '...' : ''))
+    }
+    
+    if (meta.length > 0) {
+      displayParts.push(`(${meta.join(' · ')})`)
+    }
+    
     return {
-      label: parts.join(' '),
-      value: s.id,
+      label: displayParts.join(' '),
+      value: sessionId,
+      fullLabel,
     }
   })
 })
+
+function renderSessionLabel(option: { label: string; value: string; fullLabel?: string }) {
+  return h('span', { title: option.fullLabel || option.label }, option.label)
+}
 
 const connectedSessions = computed(() =>
   hermesCliStore.sessions.filter(s => s.status === 'connected'),
@@ -769,21 +790,7 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <NDivider style="margin: 8px 0;">
-                <NButton
-                  text
-                  size="tiny"
-                  type="primary"
-                  @click="showAdvancedOptions = !showAdvancedOptions"
-                >
-                  <template #icon>
-                    <NIcon :component="showAdvancedOptions ? ContractOutline : ExpandOutline" style="margin-right: 4px;" />
-                  </template>
-                  {{ showAdvancedOptions ? (t('pages.hermesCli.hideAdvanced') || '隐藏高级选项') : (t('pages.hermesCli.showAdvanced') || '显示高级选项') }}
-                </NButton>
-              </NDivider>
-
-              <div v-if="showAdvancedOptions" class="launch-config-section launch-config-section--advanced">
+              <div class="launch-config-section">
                 <div class="launch-config-row">
                   <NText class="launch-config-label">{{ t('pages.hermesCli.skills') }}</NText>
                   <NDynamicTags v-model:value="launchConfig.skills" class="launch-config-input" />
@@ -805,6 +812,7 @@ onUnmounted(() => {
                     :options="hermesSessionOptions"
                     :loading="hermesSessionsLoading"
                     :placeholder="t('pages.hermesCli.selectSession') || '选择会话'"
+                    :render-label="renderSessionLabel"
                     clearable
                     filterable
                     class="launch-config-input"
