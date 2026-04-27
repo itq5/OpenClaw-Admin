@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useHermesConnectionStore } from './connection'
+import { useHermesChatStore } from './chat'
 import type { HermesSession, HermesSearchResult } from '@/api/hermes/types'
 
 export const useHermesSessionStore = defineStore('hermes-session', () => {
@@ -94,6 +95,12 @@ export const useHermesSessionStore = defineStore('hermes-session', () => {
           sessions: searchResults.value.sessions.filter((s) => s.id !== id),
           total: searchResults.value.total - 1,
         }
+      }
+      // 如果删除的是当前聊天会话，清除聊天状态
+      const chatStore = useHermesChatStore()
+      if (chatStore.currentSessionId === id) {
+        chatStore.clearMessages()
+        console.log('[HermesSessionStore] Cleared chat state for deleted session:', id)
       }
     } catch (error) {
       lastError.value = error instanceof Error ? error.message : String(error)

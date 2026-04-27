@@ -76,7 +76,8 @@ export interface HermesSession {
 }
 
 export interface HermesSessionRaw {
-  id: string
+  session_id: string
+  id?: string
   title?: string | null
   preview?: string
   started_at?: number

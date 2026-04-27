@@ -1113,9 +1113,53 @@ router.get('/api/hermes/sessions/:id/messages', async (req, res) => {
 
 // DELETE /api/hermes/sessions/:id
 router.delete('/api/hermes/sessions/:id', async (req, res) => {
+  const sessionId = req.params.id
+  console.log('[Hermes] DELETE session request:', sessionId)
+  
   try {
-    await proxyRequest(req, res, getHermesWebUrl(), `/api/sessions/${req.params.id}`)
+    const targetUrl = new URL(`/api/sessions/${sessionId}`, getHermesWebUrl())
+    const isDashboard = getHermesWebUrl().includes(':9119')
+    let token = null
+    
+    if (isDashboard) {
+      try {
+        token = await fetchDashboardToken(getHermesWebUrl())
+        console.log('[Hermes] Got dashboard token for DELETE')
+      } catch (err) {
+        console.error('[Hermes] Failed to get dashboard token for DELETE:', err.message)
+      }
+    }
+    
+    const headers = buildProxyHeaders(req, getHermesWebUrl(), token)
+    
+    const proxyReq = http.request(
+      {
+        hostname: targetUrl.hostname,
+        port: targetUrl.port,
+        path: targetUrl.pathname,
+        method: 'DELETE',
+        headers,
+      },
+      (proxyRes) => {
+        console.log('[Hermes] DELETE response status:', proxyRes.statusCode)
+        
+        let body = ''
+        proxyRes.on('data', (chunk) => { body += chunk })
+        proxyRes.on('end', () => {
+          console.log('[Hermes] DELETE response body:', body)
+          res.status(proxyRes.statusCode).send(body)
+        })
+      }
+    )
+    
+    proxyReq.on('error', (err) => {
+      console.error('[Hermes] DELETE request error:', err.message)
+      res.status(502).json({ error: 'Hermes proxy error', message: err.message })
+    })
+    
+    proxyReq.end()
   } catch (err) {
+    console.error('[Hermes] DELETE session failed:', err.message)
     res.status(502).json({ error: 'Hermes Web UI unavailable', message: err.message })
   }
 })

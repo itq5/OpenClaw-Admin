@@ -19,7 +19,7 @@ import type {
 
 function transformSession(raw: HermesSessionRaw): HermesSession {
   return {
-    id: raw.id,
+    id: raw.session_id || raw.id || '',
     title: raw.title || raw.preview || undefined,
     messageCount: raw.message_count ?? 0,
     model: raw.model,
