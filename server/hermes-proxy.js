@@ -173,9 +173,14 @@ function startDashboard() {
     console.log(`[Hermes] Starting dashboard on port ${port} using: ${hermesPath}`)
 
     // 启动 hermes dashboard
+    // 传递 API_SERVER_KEY 环境变量（使用 HERMES_API_KEY 的值）
+    const hermesEnv = { ...process.env }
+    if (hermesConfig.apiKey) {
+      hermesEnv.API_SERVER_KEY = hermesConfig.apiKey
+    }
     dashboardProcess = spawn(hermesPath, ['dashboard', '--port', String(port)], {
       cwd: path.join(__dirname, '..'),
-      env: { ...process.env },
+      env: hermesEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
       shell: process.platform === 'win32', // Windows 需要 shell
@@ -208,6 +213,11 @@ function startDashboard() {
     dashboardStatus.pid = dashboardProcess.pid
     dashboardStatus.port = port
     dashboardStatus.error = null
+    
+    // 清除旧的 Dashboard token 缓存，强制下次请求时获取新 token
+    dashboardToken = null
+    dashboardTokenExpiry = 0
+    console.log('[Hermes] Dashboard token cache cleared')
 
     return { ok: true, pid: dashboardProcess.pid, port }
   } catch (err) {
@@ -409,7 +419,7 @@ export function initHermesConfig(envConfig) {
   hermesConfig.apiUrl = envFile.HERMES_API_URL || envConfig.HERMES_API_URL || 'http://localhost:8642'
   hermesConfig.apiKey = envFile.HERMES_API_KEY || envConfig.HERMES_API_KEY || ''
   hermesConfig.autoStartDashboard = envFile.HERMES_AUTO_START_DASHBOARD === 'true'
-  console.log(`[Hermes] Proxy initialized: web=${hermesConfig.webUrl}, api=${hermesConfig.apiUrl}, autoStart=${hermesConfig.autoStartDashboard}`)
+  console.log(`[Hermes] Proxy initialized: web=${hermesConfig.webUrl}, api=${hermesConfig.apiUrl}, hasApiKey=${!!hermesConfig.apiKey}, autoStart=${hermesConfig.autoStartDashboard}`)
   
   // 如果设置了自动启动，则启动 Dashboard
   if (hermesConfig.autoStartDashboard) {
@@ -525,8 +535,11 @@ async function proxyRequest(req, res, targetBaseUrl, path) {
     const proxyReq = http.request(options, (proxyRes) => {
       console.log('[Hermes] Response from upstream:', proxyRes.statusCode, path)
       
-      // 如果是 401 错误，记录响应体以便调试
-      if (proxyRes.statusCode === 401) {
+      // 如果是 401 错误，清除 Dashboard token 缓存
+      if (proxyRes.statusCode === 401 && isDashboard) {
+        console.log('[Hermes] 401 error, clearing dashboard token cache')
+        dashboardToken = null
+        dashboardTokenExpiry = 0
         let body = ''
         proxyRes.on('data', (chunk) => { body += chunk })
         proxyRes.on('end', () => {
@@ -584,6 +597,11 @@ async function proxySSEStream(req, res, targetBaseUrl, path) {
   }
 
   const headers = buildProxyHeaders(req, targetBaseUrl, token)
+  console.log('[Hermes] SSE proxy headers:', JSON.stringify({
+    'Content-Type': headers['Content-Type'],
+    'Authorization': headers['Authorization'] ? `Bearer ${headers['Authorization'].substring(7, 17)}...` : 'none',
+    'X-Hermes-Session-Id': headers['X-Hermes-Session-Id']
+  }))
   headers['Accept'] = 'text/event-stream'
   // SSE 不需要 Content-Length，使用 chunked transfer
   delete headers['Content-Length']
@@ -615,6 +633,12 @@ async function proxySSEStream(req, res, targetBaseUrl, path) {
   const proxyReq = http.request(options, (proxyRes) => {
     // 如果上游返回非 SSE 响应（如错误），正常转发
     if (proxyRes.statusCode !== 200) {
+      // 如果是 401 错误，清除 Dashboard token 缓存
+      if (proxyRes.statusCode === 401 && isDashboard) {
+        console.log('[Hermes] SSE 401 error, clearing dashboard token cache')
+        dashboardToken = null
+        dashboardTokenExpiry = 0
+      }
       // 只有在头部未发送时才移除 SSE 相关头部
       if (!res.headersSent) {
         res.removeHeader('Content-Type')
