@@ -1649,6 +1649,24 @@ async function handleDeleteCustomProvider(providerName: string) {
               v-model:value="configFormBaseUrl"
               :placeholder="editingProvider.defaultBaseUrl || ''"
             />
+            <div v-if="editingProvider.regions && editingProvider.regions.length > 0" class="provider-region-hint">
+              <NText depth="3" style="font-size: 12px; display: block; margin-top: 8px;">
+                Regional endpoints (OpenAI-compatible / Anthropic-compatible):
+              </NText>
+              <div
+                v-for="region in editingProvider.regions"
+                :key="region.region"
+                class="provider-region-row"
+              >
+                <NTag size="small" :bordered="false" round>{{ region.region }}</NTag>
+                <code class="provider-region-url">{{ region.openaiBaseUrl }}</code>
+                <span style="color: var(--text-color-3);">·</span>
+                <code class="provider-region-url">{{ region.anthropicBaseUrl }}</code>
+              </div>
+              <NText v-if="editingProvider.defaultAnthropicBaseUrl" depth="3" style="font-size: 12px; display: block; margin-top: 4px;">
+                Default Anthropic endpoint: <code>{{ editingProvider.defaultAnthropicBaseUrl }}</code>
+              </NText>
+            </div>
           </div>
 
           <div>
@@ -2398,6 +2416,23 @@ async function handleDeleteCustomProvider(providerName: string) {
   width: 100%;
   max-width: 480px;
   margin: 16px;
+}
+
+.provider-region-hint {
+  margin-top: 4px;
+}
+
+.provider-region-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.provider-region-url {
+  font-size: 12px;
+  word-break: break-all;
 }
 
 /* ---- Button hover animations ---- */
