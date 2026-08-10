@@ -606,7 +606,9 @@ const revealedKeys = ref<Set<string>>(new Set())
 const editingProvider = ref<HermesProviderConfig | null>(null)
 const showConfigForm = ref(false)
 const configFormApiKey = ref('')
+const configFormRegion = ref<string | null>(null)
 const configFormBaseUrl = ref('')
+const configFormAnthropicBaseUrl = ref('')
 const configFormModel = ref('')
 const configFormSaving = ref(false)
 const configFormModels = ref<{ id: string; name?: string }[]>([])
@@ -708,10 +710,38 @@ function getProviderDisplayBaseUrlValue(provider: HermesProviderConfig): string 
   return envVar.value
 }
 
+function getProviderAnthropicBaseUrlValue(provider: HermesProviderConfig): string {
+  if (!provider.anthropicBaseUrlKey) return provider.defaultAnthropicBaseUrl || ''
+  const envVar = modelStore.envVars.find((item) => item.key === provider.anthropicBaseUrlKey)
+  const rawVars = modelStore.rawEnvVars as Record<string, { is_set?: boolean; redacted_value?: string }> | null
+  if (envVar?.value?.trim()) return envVar.value
+  if (rawVars?.[provider.anthropicBaseUrlKey]?.is_set === true) {
+    return rawVars[provider.anthropicBaseUrlKey]!.redacted_value as string || provider.defaultAnthropicBaseUrl || ''
+  }
+  return provider.defaultAnthropicBaseUrl || ''
+}
+
+function syncConfigFormRegion(provider: HermesProviderConfig) {
+  const region = provider.regions?.find((item) => (
+    item.openaiBaseUrl === configFormBaseUrl.value.trim()
+    && item.anthropicBaseUrl === configFormAnthropicBaseUrl.value.trim()
+  ))
+  configFormRegion.value = region?.region || null
+}
+
+function handleConfigRegionChange(regionName: string) {
+  const region = editingProvider.value?.regions?.find((item) => item.region === regionName)
+  if (!region) return
+  configFormBaseUrl.value = region.openaiBaseUrl
+  configFormAnthropicBaseUrl.value = region.anthropicBaseUrl
+}
+
 async function handleOpenConfig(provider: HermesProviderConfig) {
   editingProvider.value = provider
   configFormApiKey.value = ''
   configFormBaseUrl.value = provider.defaultBaseUrl || ''
+  configFormAnthropicBaseUrl.value = provider.defaultAnthropicBaseUrl || ''
+  syncConfigFormRegion(provider)
   configFormModel.value = ''
   configFormModels.value = []
   showConfigForm.value = true
@@ -721,6 +751,8 @@ async function handleEditConfig(provider: HermesProviderConfig) {
   editingProvider.value = provider
   configFormApiKey.value = ''
   configFormBaseUrl.value = getProviderDisplayBaseUrlValue(provider)
+  configFormAnthropicBaseUrl.value = getProviderAnthropicBaseUrlValue(provider)
+  syncConfigFormRegion(provider)
   configFormModel.value = currentModelFromConfig.value || ''
   configFormModels.value = []
   const rawVars = modelStore.rawEnvVars as Record<string, { is_set?: boolean; redacted_value?: string }> | null
@@ -773,7 +805,9 @@ function handleCancelConfig() {
   editingProvider.value = null
   showConfigForm.value = false
   configFormApiKey.value = ''
+  configFormRegion.value = null
   configFormBaseUrl.value = ''
+  configFormAnthropicBaseUrl.value = ''
   configFormModel.value = ''
 }
 
@@ -788,6 +822,9 @@ async function handleSaveConfig() {
     }
     if (editingProvider.value.baseUrlKey && configFormBaseUrl.value.trim()) {
       await modelStore.setEnvVar(editingProvider.value.baseUrlKey, configFormBaseUrl.value.trim())
+    }
+    if (editingProvider.value.anthropicBaseUrlKey && configFormAnthropicBaseUrl.value.trim()) {
+      await modelStore.setEnvVar(editingProvider.value.anthropicBaseUrlKey, configFormAnthropicBaseUrl.value.trim())
     }
     
     // 如果选择了模型，设置为默认模型
@@ -834,10 +871,20 @@ async function handleDeleteConfig(provider: HermesProviderConfig) {
         await modelStore.deleteEnvVar(provider.baseUrlKey)
       }
     }
+    if (provider.anthropicBaseUrlKey) {
+      const anthropicBaseUrlVar = modelStore.envVars.find((item) => item.key === provider.anthropicBaseUrlKey)
+      const anthropicBaseUrlIsSet = anthropicBaseUrlVar?.value?.trim() || rawVars?.[provider.anthropicBaseUrlKey]?.is_set === true
+      if (anthropicBaseUrlVar && anthropicBaseUrlIsSet) {
+        await modelStore.deleteEnvVar(provider.anthropicBaseUrlKey)
+      }
+    }
     
     revealedKeys.value.delete(provider.envKey)
     if (provider.baseUrlKey) {
       revealedKeys.value.delete(provider.baseUrlKey)
+    }
+    if (provider.anthropicBaseUrlKey) {
+      revealedKeys.value.delete(provider.anthropicBaseUrlKey)
     }
     
     await modelStore.fetchEnvVars()
@@ -1638,9 +1685,20 @@ async function handleDeleteCustomProvider(providerName: string) {
             />
           </div>
 
+          <div v-if="editingProvider.regions && editingProvider.regions.length > 0">
+            <NText strong style="font-size: 14px; display: block; margin-bottom: 8px;">
+              Region
+            </NText>
+            <NSelect
+              v-model:value="configFormRegion"
+              :options="editingProvider.regions.map(region => ({ label: region.region, value: region.region }))"
+              @update:value="handleConfigRegionChange"
+            />
+          </div>
+
           <div v-if="editingProvider.baseUrlKey">
             <NText strong style="font-size: 14px; display: block; margin-bottom: 8px;">
-              Base URL
+              OpenAI-compatible Base URL
             </NText>
             <NText depth="3" style="font-size: 12px; display: block; margin-bottom: 8px;">
               {{ t('pages.hermesModels.providerConfig.baseUrlHint') }}
@@ -1649,24 +1707,19 @@ async function handleDeleteCustomProvider(providerName: string) {
               v-model:value="configFormBaseUrl"
               :placeholder="editingProvider.defaultBaseUrl || ''"
             />
-            <div v-if="editingProvider.regions && editingProvider.regions.length > 0" class="provider-region-hint">
-              <NText depth="3" style="font-size: 12px; display: block; margin-top: 8px;">
-                Regional endpoints (OpenAI-compatible / Anthropic-compatible):
-              </NText>
-              <div
-                v-for="region in editingProvider.regions"
-                :key="region.region"
-                class="provider-region-row"
-              >
-                <NTag size="small" :bordered="false" round>{{ region.region }}</NTag>
-                <code class="provider-region-url">{{ region.openaiBaseUrl }}</code>
-                <span style="color: var(--text-color-3);">·</span>
-                <code class="provider-region-url">{{ region.anthropicBaseUrl }}</code>
-              </div>
-              <NText v-if="editingProvider.defaultAnthropicBaseUrl" depth="3" style="font-size: 12px; display: block; margin-top: 4px;">
-                Default Anthropic endpoint: <code>{{ editingProvider.defaultAnthropicBaseUrl }}</code>
-              </NText>
-            </div>
+          </div>
+
+          <div v-if="editingProvider.anthropicBaseUrlKey">
+            <NText strong style="font-size: 14px; display: block; margin-bottom: 8px;">
+              Anthropic-compatible Base URL
+            </NText>
+            <NText depth="3" style="font-size: 12px; display: block; margin-bottom: 8px;">
+              Used by Anthropic-compatible clients for this provider.
+            </NText>
+            <NInput
+              v-model:value="configFormAnthropicBaseUrl"
+              :placeholder="editingProvider.defaultAnthropicBaseUrl || ''"
+            />
           </div>
 
           <div>
@@ -2416,23 +2469,6 @@ async function handleDeleteCustomProvider(providerName: string) {
   width: 100%;
   max-width: 480px;
   margin: 16px;
-}
-
-.provider-region-hint {
-  margin-top: 4px;
-}
-
-.provider-region-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.provider-region-url {
-  font-size: 12px;
-  word-break: break-all;
 }
 
 /* ---- Button hover animations ---- */
