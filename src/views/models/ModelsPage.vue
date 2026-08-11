@@ -2123,7 +2123,7 @@ async function handleQuickProviderSetup(key: QuickProviderKey) {
     } else if (key === 'minimax') {
       // MiniMax current models with full metadata (context, pricing, cache, input capabilities)
       const minimaxModels = [
-        { id: 'MiniMax-M3', name: 'MiniMax-M3', reasoning: true, input: ['text', 'image', 'video'], cost: { input: 0.6, output: 2.4, cacheRead: 0.12, cacheWrite: 0 }, contextWindow: 1000000 },
+        { id: 'MiniMax-M3', name: 'MiniMax-M3', reasoning: true, input: ['text', 'image', 'video'], cost: { input: 0.6, output: 2.4, cacheRead: 0.12, cacheWrite: null }, contextWindow: 1000000 },
         { id: 'MiniMax-M2.7', name: 'MiniMax-M2.7', reasoning: true, input: ['text'], cost: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.375 }, contextWindow: 204800 },
       ]
       modelIds = minimaxModels.map(model => model.id)
