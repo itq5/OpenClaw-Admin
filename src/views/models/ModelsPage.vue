@@ -54,7 +54,7 @@ const confirmActionType = ref<'edit' | 'create'>('edit')
 const editActiveTab = ref<'basic' | 'models' | 'preview'>('basic')
 const createActiveTab = ref<'basic' | 'models' | 'preview'>('basic')
 
-type ModelInputType = 'text' | 'image'
+type ModelInputType = 'text' | 'image' | 'video'
 
 type ModelConfig = {
   id: string
@@ -65,6 +65,7 @@ type ModelConfig = {
 const modelInputTypeOptions = [
   { label: 'text', value: 'text' },
   { label: 'image', value: 'image' },
+  { label: 'video', value: 'video' },
 ]
 
 const DEFAULT_MODEL_INPUT_TYPES: ModelInputType[] = ['text']
@@ -107,11 +108,11 @@ const QUICK_PROVIDER_PRESETS: Record<QuickProviderKey, QuickProviderPreset> = {
     key: 'minimax',
     providerId: 'minimax',
     api: 'openai-completions',
-    baseUrl: 'https://api.minimaxi.com/v1',
-    modelId: 'MiniMax-M2.5',
-    modelName: 'MiniMax-M2.5',
-    input: ['text'],
-    docsUrl: 'https://platform.minimaxi.com/docs/api-reference/text-openai-api',
+    baseUrl: 'https://api.minimax.io/v1',
+    modelId: 'MiniMax-M3',
+    modelName: 'MiniMax-M3',
+    input: ['text', 'image', 'video'],
+    docsUrl: 'https://platform.minimax.io/docs',
   },
   bailian: {
     key: 'bailian',
@@ -295,7 +296,7 @@ function readProviderText(
 
 function normalizeModelInputTypes(value: unknown): ModelInputType[] {
   if (!Array.isArray(value)) return []
-  const allowed = new Set<ModelInputType>(['text', 'image'])
+  const allowed = new Set<ModelInputType>(['text', 'image', 'video'])
   const normalized = value
     .filter((item): item is string => typeof item === 'string')
     .map((item) => item.trim().toLowerCase())
@@ -441,7 +442,7 @@ function readProviderModels(provider: ModelProviderConfig | Record<string, unkno
       const id = (typeof model.id === 'string' && model.id.trim()) ||
         (typeof model.name === 'string' && model.name.trim()) || ''
       const input = Array.isArray(model.input)
-        ? model.input.filter((v): v is ModelInputType => v === 'text' || v === 'image')
+        ? model.input.filter((v): v is ModelInputType => v === 'text' || v === 'image' || v === 'video')
         : ['text'] as ModelInputType[]
       return { id, input, raw: model }
     }
@@ -2119,6 +2120,14 @@ async function handleQuickProviderSetup(key: QuickProviderKey) {
       ]
       modelIds = bailianModels.map(model => model.id)
       modelsConfig = bailianModels
+    } else if (key === 'minimax') {
+      // MiniMax current models with full metadata (context, pricing, cache, input capabilities)
+      const minimaxModels = [
+        { id: 'MiniMax-M3', name: 'MiniMax-M3', reasoning: true, input: ['text', 'image', 'video'], cost: { input: 0.6, output: 2.4, cacheRead: 0.12, cacheWrite: null }, contextWindow: 1000000 },
+        { id: 'MiniMax-M2.7', name: 'MiniMax-M2.7', reasoning: true, input: ['text'], cost: { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.375 }, contextWindow: 204800 },
+      ]
+      modelIds = minimaxModels.map(model => model.id)
+      modelsConfig = minimaxModels
     } else {
       // 其他提供商保持现有行为
       modelIds = [preset.modelId]

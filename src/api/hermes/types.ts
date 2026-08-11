@@ -343,6 +343,13 @@ export interface HermesApiResponse<T = unknown> {
 
 // --- Provider 配置模板 ---
 
+export interface HermesProviderRegion {
+  region: string
+  openaiBaseUrl: string
+  anthropicBaseUrl: string
+  docsRoot: string
+}
+
 export interface HermesProviderConfig {
   id: string
   name: string
@@ -350,6 +357,9 @@ export interface HermesProviderConfig {
   envKey: string
   baseUrlKey?: string
   defaultBaseUrl?: string
+  // Anthropic-compatible endpoint configuration
+  anthropicBaseUrlKey?: string
+  defaultAnthropicBaseUrl?: string
   docsUrl?: string
   recommended?: boolean
   supportsModelList?: boolean
@@ -358,6 +368,8 @@ export interface HermesProviderConfig {
   modelsApiAuthType?: 'bearer' | 'x-api-key' | 'query' | 'none'
   modelsApiExtraHeaders?: Record<string, string>
   modelsApiQueryParam?: string
+  // Regional endpoint selection (global/CN)
+  regions?: HermesProviderRegion[]
 }
 
 export interface HermesCustomProvider {
@@ -443,11 +455,27 @@ export const HERMES_PROVIDERS: HermesProviderConfig[] = [
     name: 'MiniMax',
     envKey: 'MINIMAX_API_KEY',
     baseUrlKey: 'MINIMAX_BASE_URL',
-    defaultBaseUrl: 'https://api.minimax.chat/v1',
-    docsUrl: 'https://www.minimax.io/',
+    defaultBaseUrl: 'https://api.minimax.io/v1',
+    anthropicBaseUrlKey: 'MINIMAX_ANTHROPIC_BASE_URL',
+    defaultAnthropicBaseUrl: 'https://api.minimax.io/anthropic',
+    docsUrl: 'https://platform.minimax.io/docs',
     supportsModelList: true,
     modelsApiPath: '/models',
     modelsApiAuthType: 'bearer',
+    regions: [
+      {
+        region: 'global_en',
+        openaiBaseUrl: 'https://api.minimax.io/v1',
+        anthropicBaseUrl: 'https://api.minimax.io/anthropic',
+        docsRoot: 'https://platform.minimax.io/docs',
+      },
+      {
+        region: 'cn_zh',
+        openaiBaseUrl: 'https://api.minimaxi.com/v1',
+        anthropicBaseUrl: 'https://api.minimaxi.com/anthropic',
+        docsRoot: 'https://platform.minimaxi.com/docs',
+      },
+    ],
   },
   {
     id: 'deepseek',
