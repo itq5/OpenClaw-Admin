@@ -1,4 +1,9 @@
 import type { ConfigCategory, ConfigFieldSchema, ConfigFieldType } from './types'
+import {
+  MINIMAX_TTS_FORMAT_OPTIONS,
+  MINIMAX_TTS_MODEL_OPTIONS,
+  MINIMAX_TTS_REGION_OPTIONS,
+} from './configSchema'
 
 const CATEGORY_LABELS: Record<string, string> = {
   model: '模型',
@@ -76,6 +81,11 @@ const FIELD_LABELS: Record<string, string> = {
   'tts.edge.voice': 'Edge 语音',
   'tts.openai.model': 'OpenAI 模型',
   'tts.openai.voice': 'OpenAI 语音',
+  'tts.minimax.model': 'MiniMax 模型',
+  'tts.minimax.region': 'MiniMax 区域',
+  'tts.minimax.voice_id': 'MiniMax 音色',
+  'tts.minimax.format': 'MiniMax 音频格式',
+  'tts.minimax.language_boost': 'MiniMax 语种增强',
   'stt.enabled': '启用 STT',
   'stt.provider': 'STT 提供商',
   'stt.local.model': '本地模型',
@@ -143,8 +153,12 @@ const SELECT_OPTIONS: Record<string, { value: string | number; label: string }[]
     { value: 'openai', label: 'OpenAI TTS' },
     { value: 'elevenlabs', label: 'ElevenLabs' },
     { value: 'mistral', label: 'Mistral' },
+    { value: 'minimax', label: 'MiniMax T2A' },
     { value: 'neutts', label: 'NeuTTS (本地)' },
   ],
+  'tts.minimax.model': MINIMAX_TTS_MODEL_OPTIONS,
+  'tts.minimax.region': MINIMAX_TTS_REGION_OPTIONS,
+  'tts.minimax.format': MINIMAX_TTS_FORMAT_OPTIONS,
   'tts.openai.voice': [
     { value: 'alloy', label: 'Alloy' },
     { value: 'echo', label: 'Echo' },

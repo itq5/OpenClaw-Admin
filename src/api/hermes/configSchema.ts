@@ -3,6 +3,36 @@ import type {
   ConfigFieldSchema,
   HermesConfigSchema,
 } from './types'
+import {
+  MINIMAX_T2A_AUDIO_FORMATS,
+  MINIMAX_T2A_DEFAULT_AUDIO_FORMAT,
+  MINIMAX_T2A_DEFAULT_MODEL,
+  MINIMAX_T2A_DEFAULT_REGION,
+  MINIMAX_T2A_ENDPOINTS,
+  MINIMAX_T2A_MODELS,
+} from '../minimax/t2a'
+
+export interface MiniMaxTtsSelectOption {
+  value: string
+  label: string
+}
+
+// MiniMax T2A options are derived from the transport module so that the
+// selectable models, regions and audio formats have a single source of truth.
+export const MINIMAX_TTS_MODEL_OPTIONS: MiniMaxTtsSelectOption[] = MINIMAX_T2A_MODELS.map(
+  (model) => ({ value: model, label: model }),
+)
+
+export const MINIMAX_TTS_REGION_OPTIONS: MiniMaxTtsSelectOption[] = MINIMAX_T2A_ENDPOINTS.map(
+  (endpoint) => ({
+    value: endpoint.region,
+    label: `${endpoint.region} (${new URL(endpoint.url).host})`,
+  }),
+)
+
+export const MINIMAX_TTS_FORMAT_OPTIONS: MiniMaxTtsSelectOption[] = MINIMAX_T2A_AUDIO_FORMATS.map(
+  (format) => ({ value: format, label: format.toUpperCase() }),
+)
 
 export const GENERAL_FIELDS: ConfigFieldSchema[] = [
   {
@@ -263,6 +293,7 @@ export const TTS_FIELDS: ConfigFieldSchema[] = [
       { value: 'openai', label: 'OpenAI TTS' },
       { value: 'elevenlabs', label: 'ElevenLabs' },
       { value: 'mistral', label: 'Mistral' },
+      { value: 'minimax', label: 'MiniMax T2A' },
       { value: 'neutts', label: 'NeuTTS (本地)' },
     ],
   },
@@ -295,6 +326,47 @@ export const TTS_FIELDS: ConfigFieldSchema[] = [
       { value: 'nova', label: 'Nova' },
       { value: 'shimmer', label: 'Shimmer' },
     ],
+  },
+  // MiniMax text-to-audio provider fields.
+  {
+    key: 'tts.minimax.model',
+    label: 'MiniMax 模型',
+    description: 'MiniMax T2A 语音合成模型',
+    type: 'select',
+    defaultValue: MINIMAX_T2A_DEFAULT_MODEL,
+    options: MINIMAX_TTS_MODEL_OPTIONS,
+  },
+  {
+    key: 'tts.minimax.region',
+    label: 'MiniMax 区域',
+    description: 'MiniMax T2A 接口区域（全球 / 中国大陆）',
+    type: 'select',
+    defaultValue: MINIMAX_T2A_DEFAULT_REGION,
+    options: MINIMAX_TTS_REGION_OPTIONS,
+  },
+  {
+    key: 'tts.minimax.voice_id',
+    label: 'MiniMax 音色',
+    description: 'MiniMax T2A 音色 ID',
+    type: 'text',
+    defaultValue: '',
+    placeholder: '例如: female-shaonv',
+  },
+  {
+    key: 'tts.minimax.format',
+    label: 'MiniMax 音频格式',
+    description: 'MiniMax T2A 输出音频格式',
+    type: 'select',
+    defaultValue: MINIMAX_T2A_DEFAULT_AUDIO_FORMAT,
+    options: MINIMAX_TTS_FORMAT_OPTIONS,
+  },
+  {
+    key: 'tts.minimax.language_boost',
+    label: 'MiniMax 语种增强',
+    description: 'MiniMax T2A 语种识别增强',
+    type: 'text',
+    defaultValue: '',
+    placeholder: '例如: Chinese',
   },
 ]
 
